@@ -10,6 +10,8 @@ PATHS_IN_REPO = [
     config.SAMPLE_DIR,
     config.REFERENCE_DIR,
     config.PROCESSED_DIR,
+    config.WORDLIST_PATH,
+    config.WORDLIST_LICENSE_PATH,
     config.MODELS_DIR,
     config.LATEST_MODEL_POINTER,
     config.MLFLOW_DB_PATH,

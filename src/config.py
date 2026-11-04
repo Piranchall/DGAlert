@@ -16,6 +16,10 @@ SAMPLE_DIR: Path = DATA_DIR / "sample"  # committed: training pool
 REFERENCE_DIR: Path = DATA_DIR / "reference"  # committed: English word list
 PROCESSED_DIR: Path = DATA_DIR / "processed"  # gitignored: parquet splits + split report
 
+# English reference data (built by scripts/build_wordlist.py from SCOWL, committed)
+WORDLIST_PATH: Path = REFERENCE_DIR / "english_words.txt"
+WORDLIST_LICENSE_PATH: Path = REFERENCE_DIR / "SCOWL-LICENSE.txt"
+
 # Model artifacts
 MODELS_DIR: Path = ROOT_DIR / "models"
 LATEST_MODEL_POINTER: Path = MODELS_DIR / "latest.json"  # MODEL_POINTER env var can override

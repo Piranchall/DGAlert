@@ -1,0 +1,19 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Secrets
+.env
+
+# Data that is downloaded or regenerated
+data/raw/
+data/processed/
+
+# Model artifacts (keep the folder)
+models/*
+!models/.gitkeep
+
+# NOTE: the MLflow store (mlflow.db, mlruns/) is committed on purpose so graders can see run history.

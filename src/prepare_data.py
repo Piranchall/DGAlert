@@ -4,7 +4,7 @@ Steps:
 1. Load the committed sample (UMUDGA DGA domains + Tranco benign domains).
 2. Validate, printing how many rows each check drops.
 3. Add the second-level label (sld) and one column per FEATURE_NAMES entry (from src.features).
-4. Split (CLAUDE.md design decisions 4-6):
+4. Split so no second-level label is in both train and a test set, and unseen families test drift:
    - held-out families go only to test_future
    - training families + benign: GroupShuffleSplit 80/20 grouped by sld -> train / test_seen
    - test_future = held-out DGA rows + the benign rows of test_seen
@@ -110,7 +110,7 @@ def validate(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, int]]:
 
 
 def split(df: pd.DataFrame) -> tuple[dict[str, pd.DataFrame], int]:
-    """Split following CLAUDE.md decisions 4-6.
+    """Hold out whole families, then split by second-level label so no label leaks to a test set.
 
     Returns ({"train", "test_seen", "test_future"}, number of held-out rows dropped because their
     sld also appears in train). Dropping them keeps test_future free of any label seen in training.

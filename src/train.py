@@ -290,7 +290,7 @@ def train_one(
 
 
 def write_latest(result: dict, pointer: Path) -> dict:
-    """Write models/latest.json for one training result (fields per CLAUDE.md + recall_future)."""
+    """Write models/latest.json: fields the API and the next retraining read, plus recall_future."""
     latest = {
         "path": result["path"],
         "version": result["version"],

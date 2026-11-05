@@ -9,14 +9,17 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from src.config import MODEL_TYPES, PER_FAMILY_FILE
 from src.features import FEATURE_NAMES
+from src.report import write_reports
 from src.train import (
     BASIC_FEATURES,
-    MODEL_TYPES,
-    PER_FAMILY_FILE,
     comparison_table,
+    parse_args,
+    promote_if_better,
     run_training,
     stratified_subsample,
+    write_latest,
 )
 
 TINY_GRID = {"n_estimators": [5, 10], "max_depth": [2], "learning_rate": [0.1]}
@@ -161,3 +164,114 @@ def test_stratified_subsample_keeps_family_shares() -> None:
     assert len(sample) == 100
     assert sample["family"].value_counts().to_dict() == {"benign": 50, "fam_a": 50}
     assert stratified_subsample(df, 1000) is df  # small enough: returned unchanged
+
+
+# ---------------------------------------------------------------------------
+# latest.json promotion: only a strictly better f1_seen (or --force) replaces the current model
+# ---------------------------------------------------------------------------
+
+
+def candidate(model_type: str, version: str, f1_seen: float) -> dict:
+    """A training result shaped like train_one()'s return value."""
+    return {
+        "model_type": model_type,
+        "version": version,
+        "path": f"models/model_{version}.joblib",
+        "mlflow_run_id": f"run-{version}",
+        "trained_at": "2026-11-05T00:00:00+00:00",
+        "metrics": {"f1_seen": f1_seen, "f1_future": 0.5, "recall_future": 0.5},
+    }
+
+
+@pytest.fixture
+def pointer(tmp_path: Path) -> Path:
+    """latest.json already pointing at a model with f1_seen 0.80."""
+    path = tmp_path / "models" / "latest.json"
+    write_latest(candidate("rf", "20260101_000000", 0.80), path)
+    return path
+
+
+def current_version(pointer: Path) -> str:
+    return json.loads(pointer.read_text(encoding="utf-8"))["version"]
+
+
+def test_promote_with_no_existing_pointer(tmp_path: Path, capsys) -> None:
+    path = tmp_path / "models" / "latest.json"
+
+    assert promote_if_better(candidate("gb", "20260202_000000", 0.10), path)
+    assert current_version(path) == "20260202_000000"
+    assert "no current model" in capsys.readouterr().out
+
+
+def test_promote_better_candidate_replaces_pointer(pointer: Path, capsys) -> None:
+    assert promote_if_better(candidate("gb", "20260202_000000", 0.85), pointer)
+    assert current_version(pointer) == "20260202_000000"
+    assert "updated" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("f1_seen", [0.70, 0.80])  # worse, and equal (not strictly better)
+def test_promote_worse_or_equal_candidate_keeps_pointer(
+    pointer: Path, f1_seen: float, capsys
+) -> None:
+    assert not promote_if_better(candidate("gb", "20260202_000000", f1_seen), pointer)
+    assert current_version(pointer) == "20260101_000000"
+    assert "kept" in capsys.readouterr().out
+
+
+def test_promote_worse_candidate_with_force_replaces_pointer(pointer: Path, capsys) -> None:
+    assert promote_if_better(candidate("logreg", "20260202_000000", 0.10), pointer, force=True)
+    assert current_version(pointer) == "20260202_000000"
+    assert "--force" in capsys.readouterr().out
+
+
+def test_cli_force_flag() -> None:
+    assert parse_args(["--model", "rf", "--force"]).force is True
+    assert parse_args([]).force is False
+    assert parse_args([]).model == "all"
+
+
+# ---------------------------------------------------------------------------
+# reports/ built from the MLflow store of the trained fixture (no retraining)
+# ---------------------------------------------------------------------------
+
+
+def test_write_reports_from_mlflow(trained, tmp_dir: Path) -> None:
+    results, _, tracking_uri = trained
+    split_report = tmp_dir / "split_report.json"
+    split_report.write_text(
+        json.dumps(
+            {
+                "totals": {
+                    "test_seen": {"rows": 20, "dga": 10},
+                    "test_future": {"rows": 20, "dga": 15},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    results_path = tmp_dir / "reports" / "m1_results.json"
+    per_family_path = tmp_dir / "reports" / "per_family_recall.json"
+
+    write_reports(
+        results_path,
+        per_family_path,
+        tracking_uri=tracking_uri,
+        experiment_name="test-train",
+        split_report_path=split_report,
+    )
+    report = json.loads(results_path.read_text(encoding="utf-8"))
+    per_family = json.loads(per_family_path.read_text(encoding="utf-8"))
+
+    assert set(report["models"]) == set(MODEL_TYPES)
+    for r in results:
+        logged = report["models"][r["model_type"]]
+        assert logged["mlflow_run_id"] == r["mlflow_run_id"]
+        assert logged["f1_seen"] == pytest.approx(r["metrics"]["f1_seen"], abs=1e-4)
+        assert logged["params"]["model_type"] == r["model_type"]
+    assert report["class_balance"]["test_seen"]["dga_share"] == 0.5
+    assert report["class_balance"]["test_future"]["dga_share"] == 0.75
+    best_grid = report["gb_best_grid_point"]
+    assert best_grid["grid_points"] == 2
+    assert best_grid["params"]["n_estimators"] in TINY_GRID["n_estimators"]
+    assert set(per_family) == {"test_seen", "test_future"}
+    assert set(per_family["test_future"]["gb"]) == {"benign", "fam_held"}

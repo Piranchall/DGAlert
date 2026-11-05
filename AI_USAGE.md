@@ -45,6 +45,6 @@ showed the actual outputs.
 
 - **Review:** both members reviewed every pull request before it was merged.
 - **Running the code:** we ran the pipeline, the training and the API ourselves.
-- **Understanding:** both members can explain every line of the code.
+- **Understanding:** We have understood the codebase and are able to explain it
 - **Numbers:** all metrics and row counts in the documentation come from files the pipeline
   produced. None were written by hand or by an AI from memory.

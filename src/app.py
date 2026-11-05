@@ -71,7 +71,11 @@ class PredictRequest(BaseModel):
 
     model_config = ConfigDict(
         json_schema_extra={
-            "examples": [{"domain": "google.com"}, {"domain": "HTTP://Example.COM/path"}]
+            "examples": [
+                {"domain": "moiqidfvjjhjmndqp.in"},
+                {"domain": "teco.com.tw"},
+                {"domain": "HTTP://Example.COM/path"},
+            ]
         }
     )
 
@@ -91,9 +95,9 @@ class PredictResponse(BaseModel):
         json_schema_extra={
             "examples": [
                 {
-                    "domain": "pidfksipycmyg.com",
+                    "domain": "moiqidfvjjhjmndqp.in",
                     "label": "dga",
-                    "probability": 0.9938,
+                    "probability": 0.996,
                     "model_version": "20261105_062411",
                 }
             ]
@@ -117,25 +121,25 @@ class ExplainResponse(PredictResponse):
         json_schema_extra={
             "examples": [
                 {  # real response of model 20261105_062411 (rounded)
-                    "domain": "pidfksipycmyg.com",
+                    "domain": "moiqidfvjjhjmndqp.in",
                     "label": "dga",
-                    "probability": 0.9938,
+                    "probability": 0.996,
                     "model_version": "20261105_062411",
                     "base_value": -0.0369,
                     "top_contributing_features": [
+                        {"feature": "length", "value": 17.0, "contribution": 1.4049},
                         {
                             "feature": "trigram_mean_logfreq",
-                            "value": -5.1719,
-                            "contribution": 1.3637,
+                            "value": -5.5008,
+                            "contribution": 1.175,
                         },
                         {
                             "feature": "longest_dict_word_ratio",
-                            "value": 0.2308,
-                            "contribution": 1.0481,
+                            "value": 0.0,
+                            "contribution": 1.0429,
                         },
-                        {"feature": "length", "value": 13.0, "contribution": 1.0319},
-                        {"feature": "longest_consonant_run", "value": 6.0, "contribution": 0.527},
-                        {"feature": "dict_coverage", "value": 0.2308, "contribution": 0.3532},
+                        {"feature": "longest_consonant_run", "value": 12.0, "contribution": 0.6608},
+                        {"feature": "digit_ratio", "value": 0.0, "contribution": 0.4129},
                     ],
                 }
             ]

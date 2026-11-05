@@ -144,7 +144,8 @@ def test_openapi_has_examples(client: TestClient) -> None:
         ("google.com", "benign"),
         ("wikipedia.org", "benign"),
         ("github.com", "benign"),
-        ("pidfksipycmyg.com", "dga"),
+        ("teco.com.tw", "benign"),
+        ("moiqidfvjjhjmndqp.in", "dga"),
         ("qxxsoxcwrcplo.net", "dga"),
     ],
 )

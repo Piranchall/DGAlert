@@ -1,8 +1,9 @@
 """Copy the Milestone 1 results out of MLflow into reports/ (committed, readable on any machine).
 
-MLflow stores artifact locations as absolute paths, so the per-family artifacts in the committed
-store only open on the machine that trained. This module reads the latest finished parent run of
-each model type in the experiment and writes two plain JSON files:
+MLflow stores artifact locations as absolute paths; build_reports() first relocates the committed
+store to this machine's mlruns/ (src.mlflow_store) so the per-family artifacts can be downloaded.
+reports/ keeps the results readable without MLflow at all. This module reads the latest finished
+parent run of each model type in the experiment and writes two plain JSON files:
 
 - reports/m1_results.json: params + metrics + run id per model, the best GB grid point and its
   CV F1, and the DGA share of each test set (F1 depends on the class balance, so f1_seen and
@@ -19,6 +20,7 @@ import mlflow
 from mlflow.entities import Run
 
 from src import config
+from src.mlflow_store import relocate_mlflow_store, sqlite_db_path
 
 METRICS = [
     "f1_seen",
@@ -90,8 +92,12 @@ def build_reports(
     tracking_uri: str = config.MLFLOW_TRACKING_URI,
     experiment_name: str = config.MLFLOW_EXPERIMENT_NAME,
     split_report_path: Path = config.SPLIT_REPORT_PATH,
+    artifact_dir: Path = config.MLFLOW_ARTIFACT_DIR,
 ) -> tuple[dict, dict]:
     """Return (m1_results, per_family_recall) built from the MLflow store."""
+    db_path = sqlite_db_path(tracking_uri)
+    if db_path is not None:
+        relocate_mlflow_store(db_path, artifact_dir, experiment_name)
     client = mlflow.MlflowClient(tracking_uri)
     experiment = client.get_experiment_by_name(experiment_name)
     if experiment is None:

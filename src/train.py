@@ -36,6 +36,7 @@ from sklearn.preprocessing import StandardScaler
 
 from src import config
 from src.features import FEATURE_NAMES
+from src.mlflow_store import relocate_mlflow_store, sqlite_db_path
 from src.report import write_reports
 
 # Character-level features only: no dictionary and no n-gram features.
@@ -330,7 +331,13 @@ def promote_if_better(candidate: dict, pointer: Path, force: bool = False) -> bo
 
 
 def setup_mlflow(tracking_uri: str, artifact_dir: Path, experiment_name: str) -> None:
-    """Point MLflow at the given store and create the experiment if it does not exist yet."""
+    """Point MLflow at the given store and create the experiment if it does not exist yet.
+
+    A committed SQLite store is first relocated to this machine's artifact_dir (src.mlflow_store).
+    """
+    db_path = sqlite_db_path(tracking_uri)
+    if db_path is not None and relocate_mlflow_store(db_path, artifact_dir, experiment_name):
+        print(f"MLflow store: artifact location of {experiment_name!r} moved to {artifact_dir}")
     mlflow.set_tracking_uri(tracking_uri)
     if mlflow.get_experiment_by_name(experiment_name) is None:
         mlflow.create_experiment(experiment_name, artifact_location=artifact_dir.as_uri())

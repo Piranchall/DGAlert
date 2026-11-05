@@ -109,8 +109,12 @@ def validate(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, int]]:
 # ---------------------------------------------------------------------------
 
 
-def split(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
-    """Return {"train", "test_seen", "test_future"} following CLAUDE.md decisions 4-6."""
+def split(df: pd.DataFrame) -> tuple[dict[str, pd.DataFrame], int]:
+    """Split following CLAUDE.md decisions 4-6.
+
+    Returns ({"train", "test_seen", "test_future"}, number of held-out rows dropped because their
+    sld also appears in train). Dropping them keeps test_future free of any label seen in training.
+    """
     is_held_out = df["family"].isin(config.HELD_OUT_FAMILIES)
     held_out, pool = df[is_held_out], df[~is_held_out]
 
@@ -118,19 +122,27 @@ def split(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
     train_idx, test_idx = next(splitter.split(pool, groups=pool["sld"]))
     train, test_seen = pool.iloc[train_idx], pool.iloc[test_idx]
 
+    seen_in_train = held_out["sld"].isin(set(train["sld"]))
+    held_out = held_out[~seen_in_train]
+    print(f"  held_out_sld_in_train: dropped {int(seen_in_train.sum())} from test_future")
+
     test_future = pd.concat([held_out, test_seen[test_seen["label"] == "benign"]])
-    return {
+    splits = {
         "train": train.reset_index(drop=True),
         "test_seen": test_seen.reset_index(drop=True),
         "test_future": test_future.reset_index(drop=True),
     }
+    return splits, int(seen_in_train.sum())
 
 
-def split_report(splits: dict[str, pd.DataFrame], drops: dict[str, int]) -> dict:
-    """Counts per split and per family, plus the leakage check between train and test_seen."""
+def split_report(
+    splits: dict[str, pd.DataFrame], drops: dict[str, int], held_out_dropped: int
+) -> dict:
+    """Counts per split and per family, plus the sld leakage checks (both must be 0)."""
     shared = set(splits["train"]["sld"]) & set(splits["test_seen"]["sld"])
     report = {
         "validation_drops": drops,
+        "held_out_dropped_sld_in_train": held_out_dropped,
         "totals": {},
         "rows_per_family": {},
         "shared_sld_train_test_seen": len(shared),
@@ -159,10 +171,12 @@ def split_report(splits: dict[str, pd.DataFrame], drops: dict[str, int]) -> dict
 def prepare_data(sample_dir: Path, out_dir: Path) -> dict:
     """Validate the sample, split it, write parquet files + split_report.json; return the report."""
     df, drops = validate(load_sample(sample_dir))
-    splits = split(df)
-    report = split_report(splits, drops)
-    if report["shared_sld_train_test_seen"] != 0:
-        raise RuntimeError("Leakage: some sld values are in both train and test_seen")
+    print("Split:")
+    splits, held_out_dropped = split(df)
+    report = split_report(splits, drops, held_out_dropped)
+    for test_name in ("test_seen", "test_future"):
+        if report[f"shared_sld_train_{test_name}"] != 0:
+            raise RuntimeError(f"Leakage: some sld values are in both train and {test_name}")
 
     out_dir.mkdir(parents=True, exist_ok=True)
     for name, frame in splits.items():
@@ -178,6 +192,7 @@ def main() -> None:
     for name, totals in report["totals"].items():
         print(f"{name}: {totals}")
     print(f"shared sld train/test_seen: {report['shared_sld_train_test_seen']}")
+    print(f"shared sld train/test_future: {report['shared_sld_train_test_future']}")
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 
 **Flags malware-generated domain names (DGA) from the domain string alone, served as a FastAPI service.**
 
-DGAlert classifies a domain such as `pidfksipycmyg.com` as `benign` or `dga` (made by a malware
+DGAlert classifies a domain such as `moiqidfvjjhjmndqp.in` as `benign` or `dga` (made by a malware
 Domain Generation Algorithm) using 15 lexical features of its second-level label, and explains each
 decision with SHAP. It is the Milestone 1 deliverable of an MLOps course project (BS CS, IBA,
 Fall 2026). Milestone 2 adds automated retraining (KaizenML) as new malware families appear.
@@ -297,28 +297,39 @@ starts: `/health` reports it, and `/predict` and `/explain` return 503.
 Input is normalized first (trimmed, lowercased; scheme, path, port and trailing dot removed, so
 `HTTP://Example.COM/path` becomes `example.com`). It must then be a valid DNS name: ASCII only, at
 least one dot, labels of 1-63 letters/digits/hyphens with no leading or trailing hyphen, at most
-253 characters, and not a bare public suffix like `co.uk`. Anything else gets a 422 with a message.
+253 characters, and not a bare public suffix like `co.uk`. It must also end in a known public
+suffix: IP addresses (`8.8.8.8`) and internal names (`host.local`, `abc.internal`) are rejected,
+because the model never saw them in training and would score the wrong label (for
+`pidfksipycmyg.local` it would look at `local`). Anything else gets a 422 with a message.
 
 ### `POST /predict`
 
 ```bash
-curl -X POST http://127.0.0.1:8000/predict -H "Content-Type: application/json" -d '{"domain": "pidfksipycmyg.com"}'
+curl -X POST http://127.0.0.1:8000/predict -H "Content-Type: application/json" -d '{"domain": "moiqidfvjjhjmndqp.in"}'
 ```
 
 ```json
-{"domain": "pidfksipycmyg.com", "label": "dga", "probability": 0.9938, "model_version": "20261105_062411"}
+{"domain": "moiqidfvjjhjmndqp.in", "label": "dga", "probability": 0.996, "model_version": "20261105_062411"}
 ```
 
 ```json
-{"domain": "google.com", "label": "benign", "probability": 0.006, "model_version": "20261105_062411"}
+{"domain": "teco.com.tw", "label": "benign", "probability": 0.0021, "model_version": "20261105_062411"}
 ```
 
+Both example domains are from `test_seen`, so the model never trained on them:
+`moiqidfvjjhjmndqp.in` is a `ranbyus_v2` DGA domain and `teco.com.tw` is a Tranco domain.
 `probability` is P(dga), rounded to 4 decimals; `label` is `dga` when it is at least 0.5.
 
-Invalid input (`-bad.com`), HTTP 422:
+Invalid input, HTTP 422. For `-bad.com`:
 
 ```json
 {"detail": [{"type": "value_error", "loc": ["body", "domain"], "msg": "Value error, label '-bad' must not start or end with a hyphen", "input": "-bad.com", "ctx": {"error": {}}}]}
+```
+
+For `8.8.8.8`:
+
+```json
+{"detail": [{"type": "value_error", "loc": ["body", "domain"], "msg": "Value error, '8.8.8.8' has no known public suffix; IP addresses and internal names are not supported", "input": "8.8.8.8", "ctx": {"error": {}}}]}
 ```
 
 ### `POST /explain`
@@ -386,8 +397,8 @@ CI (GitHub Actions, Ubuntu, Python 3.13) runs the same three commands on every p
 The tests run from a clean clone with no `data/raw/`, `data/processed/` or `models/`: they train
 tiny models on `data/sample/` or on synthetic data in a temporary folder.
 
-Tests marked `@pytest.mark.sanity` check the real trained model (e.g. `google.com` is benign,
-`pidfksipycmyg.com` is dga). They **only run when `models/latest.json` exists**, and are skipped
+Tests marked `@pytest.mark.sanity` check the real trained model (e.g. `teco.com.tw` is benign,
+`moiqidfvjjhjmndqp.in` is dga). They **only run when `models/latest.json` exists**, and are skipped
 otherwise (as in CI). Run them alone with `pytest -m sanity`.
 
 ## Citations

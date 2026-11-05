@@ -12,6 +12,15 @@ PATHS_IN_REPO = [
     config.PROCESSED_DIR,
     config.WORDLIST_PATH,
     config.WORDLIST_LICENSE_PATH,
+    config.UMUDGA_DIR,
+    config.TRANCO_PATH,
+    config.UMUDGA_SAMPLE_PATH,
+    config.TRANCO_SAMPLE_PATH,
+    config.SAMPLE_INFO_PATH,
+    config.TRAIN_PATH,
+    config.TEST_SEEN_PATH,
+    config.TEST_FUTURE_PATH,
+    config.SPLIT_REPORT_PATH,
     config.MODELS_DIR,
     config.LATEST_MODEL_POINTER,
     config.MLFLOW_DB_PATH,
@@ -48,3 +57,10 @@ def test_mlflow_tracking_uri_points_to_repo_sqlite_db() -> None:
 def test_reproducibility_constants() -> None:
     assert config.SEED == 42
     assert isinstance(config.HELD_OUT_FAMILIES, list)
+
+
+def test_family_lists_are_disjoint_and_unique() -> None:
+    held, excluded = config.HELD_OUT_FAMILIES, config.EXCLUDED_FAMILIES
+    assert len(set(held)) == len(held)
+    assert len(set(excluded)) == len(excluded)
+    assert not set(held) & set(excluded), "a family cannot be both held out and excluded"

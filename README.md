@@ -47,14 +47,14 @@ a fixed English word list in `data/reference/`, never from the training data, to
 
 ## Quick start
 
-**Requires Python 3.13.**
+**Requires Python 3.11.**
 
 `data/raw/` is not needed: `prepare_data` reads the committed sample in `data/sample/`.
 
 Windows (PowerShell, from the repo root):
 
 ```powershell
-py -3.13 -m venv venv
+py -3.11 -m venv venv
 venv\Scripts\python -m pip install -r requirements.txt
 
 venv\Scripts\python -m src.prepare_data          # writes data/processed/
@@ -371,7 +371,7 @@ venv\Scripts\ruff check src tests scripts
 venv\Scripts\ruff format --check src tests scripts
 ```
 
-CI (GitHub Actions, Ubuntu, Python 3.13) runs the same three commands on every push and pull request.
+CI (GitHub Actions, Ubuntu, Python 3.11) runs the same three commands on every push and pull request.
 
 | File | Covers |
 |---|---|

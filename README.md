@@ -358,10 +358,10 @@ Without a model it returns HTTP 503 with `{"status": "unhealthy", "model_loaded"
   the 10 bands, and so 90% of benign rows, come from below the top 100,000. Less popular domains
   look more random, so more of them are flagged as DGA. This lowers precision, but it is closer to
   what a resolver really sees than a top-N list would be.
-- **MLflow artifact links only work on the machine that created them.** The `dgalert-m1`
-  experiment stores an absolute `file:///` artifact path. Run metrics and parameters in `mlflow.db`
-  open anywhere, but artifact links in `mlflow ui` break on another machine. That is why
-  `src/report.py` copies the results and per-family recall into `reports/`, which is committed.
+
+MLflow saves artifact locations as absolute paths, so `src.train` and `src.report` first rewrite
+the `dgalert-m1` paths in the committed `mlflow.db` to this clone's `mlruns/`
+(`src/mlflow_store.py`); after either has run once, `mlflow ui` artifact links work on any machine.
 
 ## Tests
 

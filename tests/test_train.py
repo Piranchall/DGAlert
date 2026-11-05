@@ -258,6 +258,7 @@ def test_write_reports_from_mlflow(trained, tmp_dir: Path) -> None:
         tracking_uri=tracking_uri,
         experiment_name="test-train",
         split_report_path=split_report,
+        artifact_dir=tmp_dir / "mlruns",
     )
     report = json.loads(results_path.read_text(encoding="utf-8"))
     per_family = json.loads(per_family_path.read_text(encoding="utf-8"))

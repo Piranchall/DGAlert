@@ -43,7 +43,8 @@ LATEST_MODEL_POINTER: Path = MODELS_DIR / "latest.json"  # MODEL_POINTER env var
 # Reproducibility
 SEED: int = 42
 
-# A domain is labelled "dga" when the model's P(dga) is at least this value (CLAUDE.md decision 11).
+# A domain is labelled "dga" when P(dga) is at least this value. Fixed in advance, not tuned on the
+# test sets, so test scores stay unbiased; the API and the evaluation use the same cut-off.
 DGA_THRESHOLD: float = 0.5
 
 # Tranco list used for benign domains: https://tranco-list.eu/list/746WX/1000000

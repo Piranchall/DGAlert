@@ -65,8 +65,9 @@ venv\Scripts\python -m uvicorn src.app:app       # API at http://127.0.0.1:8000,
 venv\Scripts\mlflow ui --backend-store-uri sqlite:///mlflow.db   # run history at http://127.0.0.1:5000
 ```
 
-Training takes about 11 minutes, almost all of it the gradient boosting grid search
-(27 grid points x 3 folds).
+Training takes about 11 minutes. Most of it is the gradient boosting model: about 6 minutes of grid
+search (27 grid points x 3 folds) and about 4.4 minutes refitting the best grid point on the full
+train set.
 
 Linux/macOS equivalents (see `Makefile`):
 
@@ -205,6 +206,15 @@ catches 0.8853 of DGA domains from families it has seen but only 0.7885 from fam
 To be honest about the margin: gb's lead over rf is small (0.0051 F1 on `test_seen`, 0.0035 on
 `test_future`), and rf is better on some families (e.g. `suppobox_2`, `vawtrak_v3`, `rovnix` in
 `test_seen`). On accuracy alone the two are close; points 2 and 3 decide it.
+
+Two caveats about the tuning:
+
+- **The best `max_depth` (7) is the largest value in the grid** (3, 5, 7), and the best
+  `learning_rate` (0.05) is the smallest (0.05, 0.1, 0.2). So the search did not show that deeper
+  trees or a smaller learning rate would be worse; it only found the best point inside this grid.
+- **gb's `train_time_s` (261.2648) is the final refit only.** The grid search before it is not
+  included. By the MLflow run timestamps it ran for 357 s of the 622 s gb run, which makes it the
+  biggest single part of the ~11-minute training.
 
 ### Per-family recall (gb)
 
@@ -369,6 +379,24 @@ Without a model it returns HTTP 503 with `{"status": "unhealthy", "model_loaded"
   the 10 bands, and so 90% of benign rows, come from below the top 100,000. Less popular domains
   look more random, so more of them are flagged as DGA. This lowers precision, but it is closer to
   what a resolver really sees than a top-N list would be.
+- **One hyphen hides a DGA domain.** `scripts/hyphen_evasion.py` takes 2000 `test_seen` DGA domains
+  (seed 42) that gb labels dga and inserts one hyphen in the middle of each second-level label
+  (`moiqidfvjjhjmndqp.in` -> `moiqidfv-jjhjmndqp.in`). The share still labelled dga is **0.0000**:
+  every one of them flips to benign. Our demo domain drops from P(dga) 0.996 to 0.0067, and
+  `/explain` puts `hyphen_count` at -7.50 log-odds. The cause is the training data: **0 of the
+  76771 training DGA rows** have a hyphen in their second-level label, while hyphens do occur in
+  benign names, so the model learned "hyphen = benign". This is also why matsnu is missed (see
+  [the drift story](#matsnu-hyphen--english-words--benign)). The planned fix is Milestone 2's
+  retraining on hyphenated families such as matsnu. Run it with `python -m scripts.hyphen_evasion`
+  (needs `data/processed/` and a trained model).
+- **False alarms dominate when DGA traffic is rare.** gb's false-positive rate on `test_seen` is
+  **0.1066**, derived as 1 minus gb's `benign` recall on `test_seen` (0.8934) in
+  `reports/per_family_recall.json`. `test_seen` is about half DGA, but real DNS traffic is mostly
+  benign. Take 10,000 domains of which 1% (100) are DGA. With `recall_seen` 0.8853, gb finds about
+  89 of the 100, but it also flags about 1,055 of the 9,900 benign domains (9,900 x 0.1066). Only
+  about 7.7% of its alerts would be real (precision 88.53 / (88.53 + 1055.34) = 0.0774).
+  Threshold-independent metrics (ROC-AUC) and a separate validation split for model selection are
+  planned for Milestone 2.
 
 MLflow saves artifact locations as absolute paths, so `src.train` and `src.report` first rewrite
 the `dgalert-m1` paths in the committed `mlflow.db` to this clone's `mlruns/`
@@ -393,6 +421,7 @@ CI (GitHub Actions, Ubuntu, Python 3.13) runs the same three commands on every p
 | `tests/test_model_loader.py` | loading via `latest.json`, the `MODEL_POINTER` override, missing or malformed pointers |
 | `tests/test_app.py` | `/health` and `/predict`: success, 503 without a model, every 422 validation rule |
 | `tests/test_explain.py` | `/explain` shape and agreement with `/predict`; SHAP additivity for gb, rf and the logreg fallback |
+| `tests/test_hyphen_evasion.py` | hyphen insertion in `scripts/hyphen_evasion.py` keeps the suffix and splits the label in the middle |
 
 The tests run from a clean clone with no `data/raw/`, `data/processed/` or `models/`: they train
 tiny models on `data/sample/` or on synthetic data in a temporary folder.

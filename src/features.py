@@ -67,6 +67,15 @@ def second_level_label(domain: str) -> str:
     return _EXTRACTOR(normalize_domain(domain)).domain
 
 
+def public_suffix(domain: str) -> str:
+    """Return the public suffix of a domain, e.g. 'mail.google.co.uk' -> 'co.uk'.
+
+    Empty when the name ends in no known suffix: IP addresses ('8.8.8.8') and internal names
+    ('host.local', 'abc.internal').
+    """
+    return _EXTRACTOR(normalize_domain(domain)).suffix
+
+
 # ---------------------------------------------------------------------------
 # Reference data: word list and n-gram tables
 # ---------------------------------------------------------------------------

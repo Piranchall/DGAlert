@@ -12,6 +12,7 @@ import re
 from collections import Counter
 from pathlib import Path
 
+import pandas as pd
 import tldextract
 
 from src.config import WORDLIST_PATH
@@ -222,3 +223,12 @@ def extract_features(domain: str) -> list[float]:
     second-level label (for example an empty string or a bare suffix like 'co.uk').
     """
     return label_features(second_level_label(domain))
+
+
+def feature_frame(domain: str) -> pd.DataFrame:
+    """One-row DataFrame of extract_features(domain) with FEATURE_NAMES columns.
+
+    This is the model input format used in training (src.train passes df[FEATURE_NAMES]), so
+    scikit-learn sees the same column names and the logreg pipeline can select its subset.
+    """
+    return pd.DataFrame([extract_features(domain)], columns=FEATURE_NAMES)

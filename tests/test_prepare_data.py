@@ -17,6 +17,9 @@ TOO_LONG_TOTAL = ("b" * 60 + ".") * 4 + "example.com"  # every label ok, total >
 TRAIN_A = ["qwxkzt.com", "plmnbv.net", "zxcvbq.org", "hjkwer.com", "tyuqop.net", "rtyfgh.org"]
 TRAIN_B = ["mnbvxz.com", "lkjpoi.net", "ghjtyr.org", "vbnmqw.com", "asdqwe.net", "fghrty.org"]
 HELD = ["heldone.com", "heldtwo.com", "heldthree.com"]
+# Held-out domains reusing every training sld with another TLD: the ones whose sld lands in train
+# must be dropped from test_future.
+HELD_SHARED_SLD = [d.split(".")[0] + ".info" for d in TRAIN_A + TRAIN_B]
 EXCLUDED = ["excludedone.com", "excludedtwo.com"]
 BENIGN = [
     "google.com",
@@ -54,7 +57,7 @@ def sample_dir(tmp_path: Path) -> Path:
     rows = (
         [(d, "fam_a") for d in TRAIN_A]
         + [(d, "fam_b") for d in TRAIN_B]
-        + [(d, "fam_held") for d in HELD]
+        + [(d, "fam_held") for d in HELD + HELD_SHARED_SLD]
         + [(d, "fam_excl") for d in EXCLUDED]
         + [(SHARED, "fam_b")]
         + BAD_DGA
@@ -149,6 +152,20 @@ def test_held_out_family_only_in_test_future(prepared: tuple) -> None:
     assert "fam_held" not in set(splits["train"]["family"])
     assert "fam_held" not in set(splits["test_seen"]["family"])
     assert set(splits["test_future"]["domain"]) >= set(HELD)
+
+
+def test_test_future_has_no_sld_seen_in_train(prepared: tuple) -> None:
+    report, splits = prepared
+    train_slds = set(splits["train"]["sld"])
+    assert not train_slds & set(splits["test_future"]["sld"])
+    assert report["shared_sld_train_test_future"] == 0
+    # Exactly the held-out rows whose sld is in train were dropped, and the fixture has some.
+    expected = sum(d.split(".")[0] in train_slds for d in HELD_SHARED_SLD)
+    assert expected > 0
+    assert report["held_out_dropped_sld_in_train"] == expected
+    # Held-out rows whose sld is not in train are kept.
+    kept = {d for d in HELD_SHARED_SLD if d.split(".")[0] not in train_slds}
+    assert kept <= set(splits["test_future"]["domain"])
 
 
 def test_test_future_is_held_out_dga_plus_test_seen_benign(prepared: tuple) -> None:

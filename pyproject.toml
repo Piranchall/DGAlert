@@ -16,3 +16,6 @@ select = ["E", "W", "F", "I", "B", "UP", "SIM", "N"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "sanity: checks on the real trained model in models/latest.json (skipped when it is absent)",
+]

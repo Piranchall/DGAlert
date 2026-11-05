@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src import config
 from src.explain import DomainExplainer, build_explainer
-from src.features import feature_frame, normalize_domain, second_level_label
+from src.features import feature_frame, normalize_domain, public_suffix, second_level_label
 from src.model_loader import load_model
 
 logger = logging.getLogger(__name__)
@@ -51,6 +51,11 @@ def validate_domain(raw: str) -> str:
             raise ValueError(f"label '{label}' may only contain letters, digits and hyphens")
         if label.startswith("-") or label.endswith("-"):
             raise ValueError(f"label '{label}' must not start or end with a hyphen")
+    if not public_suffix(domain):
+        raise ValueError(
+            f"'{domain}' has no known public suffix; "
+            "IP addresses and internal names are not supported"
+        )
     if not second_level_label(domain):
         raise ValueError(f"'{domain}' has no second-level label (it is a bare public suffix)")
     return domain

@@ -56,7 +56,19 @@ def test_explain_matches_predict(client: TestClient, domain: str) -> None:
         assert explained[key] == predicted[key]
 
 
-@pytest.mark.parametrize("domain", ["", "localhost", "-bad.com", "co.uk", "bücher.de"])
+@pytest.mark.parametrize(
+    "domain",
+    [
+        "",
+        "localhost",
+        "-bad.com",
+        "co.uk",
+        "bücher.de",
+        "pidfksipycmyg.local",
+        "abc.internal",
+        "8.8.8.8",
+    ],
+)
 def test_explain_invalid_domain(client: TestClient, domain: str) -> None:
     assert client.post("/explain", json={"domain": domain}).status_code == 422
 

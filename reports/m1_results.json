@@ -1,0 +1,98 @@
+{
+  "experiment": "dgalert-m1",
+  "positive_class": "dga",
+  "threshold": 0.5,
+  "best_model_by_f1_seen": "gb",
+  "class_balance": {
+    "test_seen": {
+      "rows": 38373,
+      "dga": 19229,
+      "dga_share": 0.5011
+    },
+    "test_future": {
+      "rows": 61141,
+      "dga": 41997,
+      "dga_share": 0.6869
+    }
+  },
+  "models": {
+    "logreg": {
+      "mlflow_run_id": "da37618448e64d4e8a8d72405ee86ffb",
+      "params": {
+        "C": 1.0,
+        "class_weight": "balanced",
+        "features": "basic",
+        "max_iter": 1000,
+        "model_path": "models/model_20261105_061331.joblib",
+        "model_type": "logreg",
+        "n_features": 8,
+        "seed": 42,
+        "train_rows": 153627,
+        "version": "20261105_061331"
+      },
+      "f1_seen": 0.7635,
+      "precision_seen": 0.7721,
+      "recall_seen": 0.7552,
+      "f1_future": 0.8414,
+      "recall_future": 0.8003,
+      "train_time_s": 0.6825
+    },
+    "rf": {
+      "mlflow_run_id": "5aa355e272f9403d935e68045593b943",
+      "params": {
+        "class_weight": "balanced",
+        "features": "all",
+        "model_path": "models/model_20261105_061343.joblib",
+        "model_type": "rf",
+        "n_estimators": 100,
+        "n_features": 15,
+        "n_jobs": -1,
+        "seed": 42,
+        "train_rows": 153627,
+        "version": "20261105_061343"
+      },
+      "f1_seen": 0.884,
+      "precision_seen": 0.8828,
+      "recall_seen": 0.8852,
+      "f1_future": 0.8549,
+      "recall_future": 0.7867,
+      "train_time_s": 10.487
+    },
+    "gb": {
+      "mlflow_run_id": "9c15d284722c46fc9355f98e134b44d1",
+      "params": {
+        "cv_folds": 3,
+        "cv_max_rows": 40000,
+        "features": "all",
+        "learning_rate": 0.05,
+        "max_depth": 7,
+        "model_path": "models/model_20261105_062411.joblib",
+        "model_type": "gb",
+        "n_estimators": 200,
+        "n_features": 15,
+        "seed": 42,
+        "train_rows": 153627,
+        "version": "20261105_062411"
+      },
+      "f1_seen": 0.8891,
+      "precision_seen": 0.8929,
+      "recall_seen": 0.8853,
+      "f1_future": 0.8584,
+      "recall_future": 0.7885,
+      "train_time_s": 261.2648
+    }
+  },
+  "gb_best_grid_point": {
+    "params": {
+      "n_estimators": 200,
+      "max_depth": 7,
+      "learning_rate": 0.05
+    },
+    "cv_f1_mean": 0.8841,
+    "cv_f1_std": 0.0026,
+    "cv_rows": 40000,
+    "cv_folds": 3,
+    "grid_points": 27,
+    "mlflow_run_id": "a185cd0e2ed54d4b9ba68d7eb8272443"
+  }
+}

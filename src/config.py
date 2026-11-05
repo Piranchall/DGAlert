@@ -79,3 +79,11 @@ MLFLOW_DB_PATH: Path = ROOT_DIR / "mlflow.db"
 MLFLOW_TRACKING_URI: str = f"sqlite:///{MLFLOW_DB_PATH.as_posix()}"
 MLFLOW_ARTIFACT_DIR: Path = ROOT_DIR / "mlruns"
 MLFLOW_EXPERIMENT_NAME: str = "dgalert-m1"
+MODEL_TYPES: list[str] = ["logreg", "rf", "gb"]  # one MLflow parent run each (tag model_type)
+PER_FAMILY_FILE: str = "per_family_recall.json"  # MLflow artifact name in every parent run
+
+# Results copied out of MLflow into the repo (MLflow artifact paths are machine-specific).
+# Built by src/report.py from the latest finished parent run of each model type; committed.
+REPORTS_DIR: Path = ROOT_DIR / "reports"
+RESULTS_REPORT_PATH: Path = REPORTS_DIR / "m1_results.json"
+PER_FAMILY_REPORT_PATH: Path = REPORTS_DIR / "per_family_recall.json"

@@ -11,7 +11,10 @@ Every saved model is a scikit-learn estimator that takes a DataFrame with all FE
 columns (logreg selects its own subset inside its pipeline), so callers never need to know
 which features a model uses. models/latest.json points at the run with the best f1_seen.
 
-Run with: python -m src.train --model all   (or logreg / rf / gb)
+latest.json is only replaced when the new best run has a strictly higher f1_seen than the run it
+points to now (or with --force). After training, reports/ is rebuilt from MLflow (src/report.py).
+
+Run with: python -m src.train --model all   (or logreg / rf / gb; add --force to always promote)
 """
 
 import argparse
@@ -33,8 +36,7 @@ from sklearn.preprocessing import StandardScaler
 
 from src import config
 from src.features import FEATURE_NAMES
-
-MODEL_TYPES = ["logreg", "rf", "gb"]
+from src.report import write_reports
 
 # Character-level features only: no dictionary and no n-gram features.
 BASIC_FEATURES: list[str] = [
@@ -59,7 +61,6 @@ GB_GRID: dict[str, list] = {
 GB_CV_MAX_ROWS = 40_000  # the grid search runs on a stratified subsample of at most this many rows
 GB_CV_FOLDS = 3
 
-PER_FAMILY_FILE = "per_family_recall.json"
 TABLE_COLUMNS = [
     "f1_seen",
     "precision_seen",
@@ -273,7 +274,7 @@ def train_one(
 
         mlflow.log_params(params)
         mlflow.log_metrics(metrics)
-        mlflow.log_dict(families, PER_FAMILY_FILE)
+        mlflow.log_dict(families, config.PER_FAMILY_FILE)
         print(f"  f1_seen {seen['f1']:.4f}  f1_future {future['f1']:.4f}  -> {model_path.name}")
 
         return {
@@ -304,6 +305,30 @@ def write_latest(result: dict, pointer: Path) -> dict:
     return latest
 
 
+def promote_if_better(candidate: dict, pointer: Path, force: bool = False) -> bool:
+    """Point latest.json at candidate if there is no pointer yet, it is strictly better, or force.
+
+    "Better" means a higher f1_seen than the run latest.json points to now. Prints which case
+    happened and returns True if latest.json was written.
+    """
+    new_f1 = candidate["metrics"]["f1_seen"]
+    new = f"{candidate['model_type']} {candidate['version']} (f1_seen {new_f1:.4f})"
+    if not pointer.exists():
+        print(f"\nlatest.json: no current model -> pointing at {new}")
+    else:
+        current = json.loads(pointer.read_text(encoding="utf-8"))
+        old = f"{current['model_type']} {current['version']} (f1_seen {current['f1_seen']:.4f})"
+        if force:
+            print(f"\nlatest.json: --force -> replacing {old} with {new}")
+        elif new_f1 > current["f1_seen"]:
+            print(f"\nlatest.json: {new} beats {old} -> updated")
+        else:
+            print(f"\nlatest.json: kept {old}; {new} is not strictly better")
+            return False
+    write_latest(candidate, pointer)
+    return True
+
+
 def setup_mlflow(tracking_uri: str, artifact_dir: Path, experiment_name: str) -> None:
     """Point MLflow at the given store and create the experiment if it does not exist yet."""
     mlflow.set_tracking_uri(tracking_uri)
@@ -322,8 +347,9 @@ def run_training(
     experiment_name: str = config.MLFLOW_EXPERIMENT_NAME,
     gb_grid: dict[str, list] = GB_GRID,
     gb_max_rows: int = GB_CV_MAX_ROWS,
+    force: bool = False,
 ) -> list[dict]:
-    """Train each model type, then point latest.json at the result with the best f1_seen."""
+    """Train each model type, then promote the best f1_seen result if it beats latest.json."""
     splits = load_splits(processed_dir)
     setup_mlflow(tracking_uri, artifact_dir, experiment_name)
     results = [
@@ -331,8 +357,7 @@ def run_training(
         for model_type in model_types
     ]
     best = max(results, key=lambda r: r["metrics"]["f1_seen"])
-    write_latest(best, pointer)
-    print(f"\nlatest.json -> {best['model_type']} ({best['path']})")
+    promote_if_better(best, pointer, force)
     return results
 
 
@@ -356,13 +381,22 @@ def held_out_recall_table(results: list[dict]) -> pd.DataFrame:
     return pd.DataFrame(columns)
 
 
-def main() -> None:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train DGAlert models and log them to MLflow.")
-    parser.add_argument("--model", choices=[*MODEL_TYPES, "all"], default="all")
-    args = parser.parse_args()
-    model_types = MODEL_TYPES if args.model == "all" else [args.model]
+    parser.add_argument("--model", choices=[*config.MODEL_TYPES, "all"], default="all")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="point latest.json at the new best run even if it is not better than the current one",
+    )
+    return parser.parse_args(argv)
 
-    results = run_training(model_types)
+
+def main() -> None:
+    args = parse_args()
+    model_types = config.MODEL_TYPES if args.model == "all" else [args.model]
+
+    results = run_training(model_types, force=args.force)
 
     print("\nComparison (test_seen / test_future; positive class = dga):")
     print(comparison_table(results).to_string())
@@ -371,6 +405,8 @@ def main() -> None:
     held_out = held_out_recall_table(results).sort_values(best)
     print(f"\n5 held-out families with the lowest recall (sorted by {best}, the best model):")
     print(held_out.head(5).to_string())
+
+    write_reports()
 
 
 if __name__ == "__main__":

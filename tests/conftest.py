@@ -34,13 +34,22 @@ def sample_domains() -> pd.DataFrame:
 
 
 @pytest.fixture(scope="session")
-def model_pointer(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
-    """Train a 20-tree GB model, save it + latest.json in a temp folder, set MODEL_POINTER."""
-    folder = tmp_path_factory.mktemp("model")
+def sample_xy() -> tuple[pd.DataFrame, pd.Series]:
+    """Features (FEATURE_NAMES columns) and target (1 = dga) for the sample_domains() rows."""
     data = sample_domains()
     x = pd.DataFrame([extract_features(d) for d in data["domain"]], columns=FEATURE_NAMES)
+    return x, data["y"]
+
+
+@pytest.fixture(scope="session")
+def model_pointer(
+    tmp_path_factory: pytest.TempPathFactory, sample_xy: tuple[pd.DataFrame, pd.Series]
+) -> Iterator[Path]:
+    """Train a 20-tree GB model, save it + latest.json in a temp folder, set MODEL_POINTER."""
+    folder = tmp_path_factory.mktemp("model")
+    x, y = sample_xy
     model = GradientBoostingClassifier(n_estimators=20, random_state=config.SEED)
-    model.fit(x, data["y"])
+    model.fit(x, y)
 
     model_path = folder / f"model_{FIXTURE_VERSION}.joblib"
     joblib.dump(model, model_path)

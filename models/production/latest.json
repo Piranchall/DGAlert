@@ -1,0 +1,31 @@
+{
+  "path": "models/production/model_20261105_062411.joblib",
+  "version": "20261105_062411",
+  "model_type": "gb",
+  "sha256": "140989615550baed7e883885e0bfe3fd3b855b79e11bc70ff2d9f3d9f3a11b47",
+  "mlflow_run_id": "9c15d284722c46fc9355f98e134b44d1",
+  "sklearn_version": "1.9.1",
+  "python_version": "3.13",
+  "feature_names": [
+    "length",
+    "digit_ratio",
+    "vowel_ratio",
+    "hyphen_count",
+    "entropy",
+    "unique_char_ratio",
+    "longest_consonant_run",
+    "digit_letter_transitions",
+    "bigram_mean_logfreq",
+    "trigram_mean_logfreq",
+    "bigram_unseen_ratio",
+    "dict_coverage",
+    "dict_word_count",
+    "longest_dict_word_ratio",
+    "is_dict_word"
+  ],
+  "phased_in_families": [],
+  "f1_seen": 0.8890920011490351,
+  "f1_future": 0.8584241701554055,
+  "recall_future": 0.7885087030025955,
+  "trained_at": "2026-11-05T06:24:12+00:00"
+}

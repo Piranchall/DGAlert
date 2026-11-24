@@ -38,7 +38,12 @@ SPLIT_REPORT_PATH: Path = PROCESSED_DIR / "split_report.json"
 
 # Model artifacts
 MODELS_DIR: Path = ROOT_DIR / "models"
-LATEST_MODEL_POINTER: Path = MODELS_DIR / "latest.json"  # MODEL_POINTER env var can override
+# Written by src.train for a locally trained candidate (gitignored). Serve it with
+# MODEL_POINTER=models/latest.json.
+LATEST_MODEL_POINTER: Path = MODELS_DIR / "latest.json"
+# The committed production model the API serves by default (MODEL_POINTER env var can override).
+PRODUCTION_DIR: Path = MODELS_DIR / "production"
+PRODUCTION_MODEL_POINTER: Path = PRODUCTION_DIR / "latest.json"
 
 # Reproducibility
 SEED: int = 42

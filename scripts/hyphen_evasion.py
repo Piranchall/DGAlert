@@ -1,11 +1,11 @@
 """How easily one hyphen hides a DGA domain from the current model.
 
-Takes N_DOMAINS test_seen DGA domains (seed 42) that the model in models/latest.json labels dga,
-inserts one hyphen in the middle of each second-level label (e.g. abcdef.com -> abc-def.com), and
-prints the share still labelled dga. Also counts the training DGA rows whose second-level label
-contains a hyphen, which explains the result.
+Takes N_DOMAINS test_seen DGA domains (seed 42) that the served model (models/production/, or
+MODEL_POINTER) labels dga, inserts one hyphen in the middle of each second-level label (e.g.
+abcdef.com -> abc-def.com), and prints the share still labelled dga. Also counts the training DGA
+rows whose second-level label contains a hyphen, which explains the result.
 
-Needs data/processed/ (python -m src.prepare_data) and a trained model (python -m src.train).
+Needs data/processed/ (python -m src.prepare_data).
 Run with: python -m scripts.hyphen_evasion
 """
 

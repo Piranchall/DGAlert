@@ -6,3 +6,6 @@
 Dockerfile text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
+
+# Model files are binary: line-ending conversion must never touch them (the loader checks SHA-256).
+*.joblib binary

@@ -1,5 +1,7 @@
 """Tests for the FastAPI app (src.app) with the tiny fixture model (see conftest.py)."""
 
+import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -42,6 +44,31 @@ def test_predict_without_model(client_without_model: TestClient) -> None:
     response = client_without_model.post("/predict", json={"domain": "google.com"})
     assert response.status_code == 503
     assert "Model not loaded" in response.json()["detail"]
+
+
+def test_tampered_model_gives_503_and_logs_reason(
+    model_pointer: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A model file whose SHA-256 differs from latest.json is not loaded; the log says why."""
+    metadata = json.loads(model_pointer.read_text(encoding="utf-8"))
+    tampered = tmp_path / "model_tampered.joblib"
+    tampered.write_bytes(Path(metadata["path"]).read_bytes() + b"tampered")
+    pointer = tmp_path / "latest.json"
+    pointer.write_text(json.dumps(metadata | {"path": tampered.as_posix()}), encoding="utf-8")
+    monkeypatch.setenv(POINTER_ENV_VAR, str(pointer))
+
+    with caplog.at_level(logging.ERROR, logger="src.app"), TestClient(app) as tampered_client:
+        health = tampered_client.get("/health")
+        predict = tampered_client.post("/predict", json={"domain": "google.com"})
+
+    assert health.status_code == 503
+    assert health.json() == {"status": "unhealthy", "model_loaded": False}
+    assert predict.status_code == 503
+    assert "Could not load the model" in caplog.text
+    assert f"expects {metadata['sha256']}" in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -130,14 +157,11 @@ def test_openapi_has_examples(client: TestClient) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Sanity check on the real trained model (skipped when models/latest.json is absent, e.g. in CI)
+# Sanity check on the committed production model (always runs, also in CI)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.sanity
-@pytest.mark.skipif(
-    not config.LATEST_MODEL_POINTER.exists(), reason="no trained model in models/latest.json"
-)
 @pytest.mark.parametrize(
     ("domain", "expected"),
     [
@@ -150,7 +174,7 @@ def test_openapi_has_examples(client: TestClient) -> None:
     ],
 )
 def test_real_model_sanity(monkeypatch: pytest.MonkeyPatch, domain: str, expected: str) -> None:
-    monkeypatch.setenv(POINTER_ENV_VAR, str(config.LATEST_MODEL_POINTER))
+    monkeypatch.setenv(POINTER_ENV_VAR, str(config.PRODUCTION_MODEL_POINTER))
     with TestClient(app) as real_client:
         response = real_client.post("/predict", json={"domain": domain})
     assert response.status_code == 200

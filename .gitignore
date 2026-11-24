@@ -15,5 +15,6 @@ data/processed/
 # Model artifacts (keep the folder)
 models/*
 !models/.gitkeep
+!models/production/
 
 # NOTE: the MLflow store (mlflow.db, mlruns/) is committed on purpose so graders can see run history.

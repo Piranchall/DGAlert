@@ -34,10 +34,9 @@ flowchart LR
     TS --> TN
     TF --> TN
     TN <--> ML[("MLflow<br/>mlflow.db + mlruns/")]
-    TN --> M["models/model_&lt;version&gt;.joblib"]
-    TN --> L["models/latest.json"]
-    L --> API["src/app.py (FastAPI)<br/>/predict · /explain · /health"]
-    M --> API
+    TN --> M["models/model_&lt;version&gt;.joblib<br/>+ models/latest.json<br/>(local candidate, gitignored)"]
+    PR[("models/production/<br/>model + latest.json<br/>committed")] --> API["src/app.py (FastAPI)<br/>/predict · /explain · /health"]
+    M -. "MODEL_POINTER=models/latest.json" .-> API
 ```
 
 All features are defined once in `src/features.py` and used by `prepare_data`, `train`, the API
@@ -57,11 +56,12 @@ Windows (PowerShell, from the repo root):
 py -3.13 -m venv venv
 venv\Scripts\python -m pip install -r requirements.txt
 
-venv\Scripts\python -m src.prepare_data          # writes data/processed/
-venv\Scripts\python -m src.train --model all     # trains logreg, rf, gb; writes models/latest.json
+venv\Scripts\python -m uvicorn src.app:app       # serves the committed model; no training needed
+                                                 # API at http://127.0.0.1:8000, docs at /docs
 venv\Scripts\python -m pytest -q
 
-venv\Scripts\python -m uvicorn src.app:app       # API at http://127.0.0.1:8000, docs at /docs
+venv\Scripts\python -m src.prepare_data          # writes data/processed/
+venv\Scripts\python -m src.train --model all     # trains logreg, rf, gb; writes models/latest.json
 venv\Scripts\mlflow ui --backend-store-uri sqlite:///mlflow.db   # run history at http://127.0.0.1:5000
 ```
 
@@ -83,6 +83,29 @@ Linux/macOS equivalents (see `Makefile`):
 Training adds runs to the committed MLflow store (`mlflow.db`, `mlruns/`) and rebuilds `reports/`.
 `models/latest.json` is only replaced when the new best model has a strictly higher `f1_seen` than
 the current one (`python -m src.train --force` overrides this).
+
+### Production model and requirements
+
+The API serves the **committed production model** in `models/production/` (the M1 `gb` model,
+version `20261105_062411`, MLflow run `9c15d284722c46fc9355f98e134b44d1`). Its `latest.json`
+records the file's SHA-256, the scikit-learn and Python versions, the feature names and the
+families phased in by retraining (none yet). Training never writes there: `src.train` writes a
+local, gitignored candidate to `models/` and `models/latest.json`. To serve that candidate instead:
+
+```powershell
+$env:MODEL_POINTER = "models/latest.json"; venv\Scripts\python -m uvicorn src.app:app
+```
+
+A relative `MODEL_POINTER` and the `path` inside a pointer are resolved against the repo root, so
+the service works from any working directory. At startup the loader checks the model file's
+SHA-256 against the pointer and refuses a mismatching file (`/health` and `/predict` return 503
+and the server log gives the reason). A pointer without `sha256` still loads, with a warning, and a
+warning is logged if the installed scikit-learn differs from the one the model was saved with.
+
+Requirements are split: `requirements-api.txt` holds only what the API needs at runtime (no
+mlflow, pytest or ruff; meant for a slim deployment image), and `requirements.txt` includes it
+and adds the training and dev tools, so `pip install -r requirements.txt` still installs
+everything.
 
 ## Data
 
@@ -195,7 +218,7 @@ catches 0.8853 of DGA domains from families it has seen but only 0.7885 from fam
 
 ### Why gb
 
-`gb` is the deployed model (`models/latest.json`), chosen because:
+`gb` is the deployed model (`models/production/`), chosen because:
 
 1. **It is best on the metric we declared in advance, `f1_seen`** (0.8891 vs 0.884 for rf).
 2. **Its artifact is much smaller** than the 100-tree, full-depth random forest. That matters for
@@ -300,9 +323,11 @@ request and response examples):
 venv\Scripts\python -m uvicorn src.app:app
 ```
 
-The model and the explainer are loaded once at startup from `models/latest.json` (the
-`MODEL_POINTER` environment variable overrides that path). If loading fails, the service still
-starts: `/health` reports it, and `/predict` and `/explain` return 503.
+The model and the explainer are loaded once at startup from `models/production/latest.json` (the
+`MODEL_POINTER` environment variable overrides that path; see
+[Production model and requirements](#production-model-and-requirements)). If loading fails,
+including a failed SHA-256 check, the service still starts: `/health` reports it, and `/predict`
+and `/explain` return 503.
 
 Input is normalized first (trimmed, lowercased; scheme, path, port and trailing dot removed, so
 `HTTP://Example.COM/path` becomes `example.com`). It must then be a valid DNS name: ASCII only, at
@@ -417,18 +442,18 @@ CI (GitHub Actions, Ubuntu, Python 3.13) runs the same three commands on every p
 | `tests/test_config.py` | paths inside the repo, MLflow tracking URI, seed, family lists disjoint |
 | `tests/test_features.py` | normalization, second-level label extraction, every feature, dictionary split |
 | `tests/test_prepare_data.py` | validation drops, grouped split with no shared labels, held-out families only in test_future, identical output on a rerun |
-| `tests/test_train.py` | training on a tiny fixture, MLflow runs, `latest.json` promotion and `--force`, report generation |
-| `tests/test_model_loader.py` | loading via `latest.json`, the `MODEL_POINTER` override, missing or malformed pointers |
-| `tests/test_app.py` | `/health` and `/predict`: success, 503 without a model, every 422 validation rule |
+| `tests/test_train.py` | training on a tiny fixture, MLflow runs, `latest.json` promotion (with `sha256`) and `--force`, report generation |
+| `tests/test_model_loader.py` | loading via `latest.json`, the `MODEL_POINTER` override, missing or malformed pointers, SHA-256 check (tampered file refused, missing hash warns), scikit-learn version warning, the committed production model (fields, hash, loading from another working directory) |
+| `tests/test_app.py` | `/health` and `/predict`: success, 503 without a model or with a tampered model, every 422 validation rule |
 | `tests/test_explain.py` | `/explain` shape and agreement with `/predict`; SHAP additivity for gb, rf and the logreg fallback |
 | `tests/test_hyphen_evasion.py` | hyphen insertion in `scripts/hyphen_evasion.py` keeps the suffix and splits the label in the middle |
 
-The tests run from a clean clone with no `data/raw/`, `data/processed/` or `models/`: they train
-tiny models on `data/sample/` or on synthetic data in a temporary folder.
+The tests run from a clean clone with no `data/raw/`, `data/processed/` or trained candidate in
+`models/`: they train tiny models on `data/sample/` or on synthetic data in a temporary folder.
 
-Tests marked `@pytest.mark.sanity` check the real trained model (e.g. `teco.com.tw` is benign,
-`moiqidfvjjhjmndqp.in` is dga). They **only run when `models/latest.json` exists**, and are skipped
-otherwise (as in CI). Run them alone with `pytest -m sanity`.
+Tests marked `@pytest.mark.sanity` check the committed production model in `models/production/`
+(e.g. `teco.com.tw` is benign, `moiqidfvjjhjmndqp.in` is dga). They always run, in CI too. Run them
+alone with `pytest -m sanity`.
 
 ## Citations
 

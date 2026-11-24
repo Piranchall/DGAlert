@@ -11,6 +11,7 @@ import pytest
 
 from src.config import MODEL_TYPES, PER_FAMILY_FILE
 from src.features import FEATURE_NAMES
+from src.model_loader import file_sha256, resolve_model_path
 from src.report import write_reports
 from src.train import (
     BASIC_FEATURES,
@@ -32,6 +33,7 @@ LATEST_FIELDS = {
     "recall_future",
     "mlflow_run_id",
     "trained_at",
+    "sha256",
 }
 
 
@@ -107,6 +109,7 @@ def test_latest_json_is_valid_and_points_at_best_model(trained) -> None:
     for metric in ("f1_seen", "f1_future", "recall_future"):
         assert 0.0 <= latest[metric] <= 1.0
     assert Path(latest["path"]).name == f"model_{latest['version']}.joblib"
+    assert latest["sha256"] == file_sha256(resolve_model_path(latest["path"]))
 
 
 def test_every_saved_model_loads_and_predicts(trained, processed_dir: Path) -> None:
@@ -177,6 +180,7 @@ def candidate(model_type: str, version: str, f1_seen: float) -> dict:
         "model_type": model_type,
         "version": version,
         "path": f"models/model_{version}.joblib",
+        "sha256": "0" * 64,
         "mlflow_run_id": f"run-{version}",
         "trained_at": "2026-11-05T00:00:00+00:00",
         "metrics": {"f1_seen": f1_seen, "f1_future": 0.5, "recall_future": 0.5},

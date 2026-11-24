@@ -37,6 +37,7 @@ from sklearn.preprocessing import StandardScaler
 from src import config
 from src.features import FEATURE_NAMES
 from src.mlflow_store import relocate_mlflow_store, sqlite_db_path
+from src.model_loader import file_sha256
 from src.report import write_reports
 
 # Character-level features only: no dictionary and no n-gram features.
@@ -282,6 +283,7 @@ def train_one(
             "model_type": model_type,
             "version": version,
             "path": portable_path(model_path),
+            "sha256": file_sha256(model_path),
             "mlflow_run_id": run.info.run_id,
             "trained_at": datetime.now(UTC).isoformat(timespec="seconds"),
             "metrics": metrics,
@@ -290,7 +292,10 @@ def train_one(
 
 
 def write_latest(result: dict, pointer: Path) -> dict:
-    """Write models/latest.json: fields the API and the next retraining read, plus recall_future."""
+    """Write models/latest.json: fields the API and the next retraining read, plus recall_future.
+
+    sha256 lets the loader refuse a model file that changed after training.
+    """
     latest = {
         "path": result["path"],
         "version": result["version"],
@@ -300,6 +305,7 @@ def write_latest(result: dict, pointer: Path) -> dict:
         "recall_future": result["metrics"]["recall_future"],
         "mlflow_run_id": result["mlflow_run_id"],
         "trained_at": result["trained_at"],
+        "sha256": result["sha256"],
     }
     pointer.parent.mkdir(parents=True, exist_ok=True)
     pointer.write_text(json.dumps(latest, indent=2) + "\n", encoding="utf-8")

@@ -185,7 +185,7 @@ label (`mail.google.co.uk` -> `google`). A domain is labelled `dga` when P(dga) 
 
 app = FastAPI(title="DGAlert", description=DESCRIPTION, version="1.0.0", lifespan=lifespan)
 
-NOT_LOADED = "Model not loaded: train one (python -m src.train) and restart the service."
+NOT_LOADED = "Model not loaded; the server log gives the reason (e.g. a failed SHA-256 check)."
 EXPLAIN_TOP_K = 5
 NO_EXPLAINER = "Explainer not available for the loaded model; see the server log."
 

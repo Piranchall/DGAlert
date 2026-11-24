@@ -16,7 +16,7 @@ from sklearn.ensemble import GradientBoostingClassifier
 from src import config
 from src.app import app
 from src.features import FEATURE_NAMES, extract_features
-from src.model_loader import POINTER_ENV_VAR
+from src.model_loader import POINTER_ENV_VAR, file_sha256
 
 ROWS_PER_CLASS = 200
 FIXTURE_VERSION = "test_fixture"
@@ -58,6 +58,7 @@ def model_pointer(
         "path": model_path.as_posix(),  # absolute: the model is outside the repo
         "version": FIXTURE_VERSION,
         "model_type": "gb",
+        "sha256": file_sha256(model_path),
         "f1_seen": 0.0,
         "f1_future": 0.0,
         "mlflow_run_id": "none",

@@ -1,0 +1,8 @@
+# Normalise text files to LF in the repository; checkouts use the platform default.
+* text=auto
+
+# Files that run inside Linux containers or CI must keep LF even on a Windows checkout.
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf

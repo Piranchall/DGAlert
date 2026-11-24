@@ -9,16 +9,18 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from src import config, train
 from src.config import MODEL_TYPES, PER_FAMILY_FILE
 from src.features import FEATURE_NAMES
 from src.model_loader import file_sha256, resolve_model_path
-from src.report import write_reports
+from src.report import build_production_report, find_run, write_reports
 from src.train import (
     BASIC_FEATURES,
     comparison_table,
     parse_args,
     promote_if_better,
     run_training,
+    setup_mlflow,
     stratified_subsample,
     write_latest,
 )
@@ -262,7 +264,6 @@ def test_write_reports_from_mlflow(trained, tmp_dir: Path) -> None:
         tracking_uri=tracking_uri,
         experiment_name="test-train",
         split_report_path=split_report,
-        artifact_dir=tmp_dir / "mlruns",
     )
     report = json.loads(results_path.read_text(encoding="utf-8"))
     per_family = json.loads(per_family_path.read_text(encoding="utf-8"))
@@ -280,3 +281,95 @@ def test_write_reports_from_mlflow(trained, tmp_dir: Path) -> None:
     assert best_grid["params"]["n_estimators"] in TINY_GRID["n_estimators"]
     assert set(per_family) == {"test_seen", "test_future"}
     assert set(per_family["test_future"]["gb"]) == {"benign", "fam_held"}
+
+
+# ---------------------------------------------------------------------------
+# The committed M1 store is never written; training leaves reports/ alone
+# ---------------------------------------------------------------------------
+
+
+def test_setup_mlflow_refuses_the_committed_snapshot(tmp_path: Path) -> None:
+    previous_uri = mlflow.get_tracking_uri()
+    try:
+        with pytest.raises(ValueError, match="committed M1 snapshot"):
+            setup_mlflow(config.sqlite_uri(config.M1_SNAPSHOT_DB), tmp_path, "test-refuse")
+    finally:
+        mlflow.set_tracking_uri(previous_uri)
+
+
+def test_setup_mlflow_creates_the_store_folder(tmp_path: Path) -> None:
+    previous_uri = mlflow.get_tracking_uri()
+    db_path = tmp_path / "new_store" / "mlflow.db"
+    try:
+        setup_mlflow(config.sqlite_uri(db_path), tmp_path / "new_store" / "mlruns", "test-new")
+    finally:
+        mlflow.set_tracking_uri(previous_uri)
+    assert db_path.is_file()
+
+
+def test_main_does_not_write_reports(trained, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    results, _, _ = trained
+
+    def fail(*args, **kwargs):
+        raise AssertionError("training must not write reports/")
+
+    monkeypatch.setattr(train, "run_training", lambda model_types, force: results)
+    monkeypatch.setattr("src.report.write_json", fail)
+    monkeypatch.setattr("src.report.write_reports", fail)
+    monkeypatch.setattr("sys.argv", ["src.train", "--model", "all"])
+
+    train.main()
+    assert "python -m src.report" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# reports/production_model.json: the run named by a pointer, found in one of several stores
+# ---------------------------------------------------------------------------
+
+
+def test_production_report_finds_the_run(trained, tmp_dir: Path, tmp_path: Path) -> None:
+    results, pointer, tracking_uri = trained
+    missing_store = tmp_path / "missing" / "mlflow.db"
+    stores = [("absent", config.sqlite_uri(missing_store)), ("local", tracking_uri)]
+
+    report = build_production_report(pointer, stores)
+
+    latest = json.loads(pointer.read_text(encoding="utf-8"))
+    best = next(r for r in results if r["mlflow_run_id"] == latest["mlflow_run_id"])
+    assert report["mlflow_store"] == "local"
+    assert report["mlflow_run_id"] == latest["mlflow_run_id"]
+    assert report["version"] == latest["version"]
+    assert report["sha256"] == latest["sha256"]
+    assert report["experiment"] == "test-train"
+    assert report["metrics"]["f1_seen"] == pytest.approx(best["metrics"]["f1_seen"], abs=1e-4)
+    assert report["per_family_recall"] == best["per_family_recall"]
+    assert not missing_store.exists()  # a missing sqlite store is skipped, not created
+
+
+def test_production_report_is_deterministic_and_has_no_paths_or_times(
+    trained, tmp_dir: Path
+) -> None:
+    _, pointer, tracking_uri = trained
+    first = build_production_report(pointer, [("local", tracking_uri)])
+    second = build_production_report(pointer, [("local", tracking_uri)])
+    assert first == second
+
+    text = json.dumps(first)
+    assert str(tmp_dir.as_posix()) not in text
+    assert "file:" not in text
+    assert "\\\\" not in text  # no Windows paths
+    assert not {"trained_at", "start_time", "end_time", "path"} & first.keys()
+    assert "model_path" not in first["params"]
+
+
+def test_production_report_run_not_found(trained, tmp_path: Path) -> None:
+    _, _, tracking_uri = trained
+    pointer = tmp_path / "latest.json"
+    pointer.write_text(
+        json.dumps({"version": "v", "model_type": "gb", "mlflow_run_id": "0" * 32}),
+        encoding="utf-8",
+    )
+    with pytest.raises(LookupError, match="not found in any store"):
+        build_production_report(pointer, [("local", tracking_uri)])
+    with pytest.raises(LookupError):
+        find_run([], "0" * 32)

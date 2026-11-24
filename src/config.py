@@ -4,6 +4,7 @@ Every other module imports its paths and constants from here, so nothing is hard
 All paths are built with pathlib from the repo root, so they work on Windows and Linux.
 """
 
+import os
 from pathlib import Path
 
 # Repo root = the folder that contains src/.
@@ -80,16 +81,52 @@ HELD_OUT_FAMILIES: list[str] = [
 ]
 
 # MLflow: MLflow 3.x recommends a SQLite backend for local tracking (the ./mlruns file store is
-# legacy). Both the database and the artifact folder live inside the repo and are committed.
-MLFLOW_DB_PATH: Path = ROOT_DIR / "mlflow.db"
-MLFLOW_TRACKING_URI: str = f"sqlite:///{MLFLOW_DB_PATH.as_posix()}"
-MLFLOW_ARTIFACT_DIR: Path = ROOT_DIR / "mlruns"
+# legacy).
+#
+# New runs go to a local, gitignored store. The env vars below override it (read when training
+# starts, see mlflow_tracking_uri() / mlflow_artifact_dir()). DGALERT_ names, not MLflow's own
+# MLFLOW_TRACKING_URI, so a global MLflow setting for another project cannot redirect our runs.
+MLFLOW_LOCAL_DIR: Path = ROOT_DIR / "mlflow_local"
+MLFLOW_LOCAL_DB: Path = MLFLOW_LOCAL_DIR / "mlflow.db"
+MLFLOW_LOCAL_ARTIFACT_DIR: Path = MLFLOW_LOCAL_DIR / "mlruns"
+TRACKING_URI_ENV_VAR = "DGALERT_MLFLOW_TRACKING_URI"
+ARTIFACT_DIR_ENV_VAR = "DGALERT_MLFLOW_ARTIFACT_DIR"
+
+# The committed Milestone 1 store is a read-only snapshot: nothing writes to these files. Tools
+# that need it (src.m1_snapshot, src.report) work on a copy in M1_SNAPSHOT_WORKDIR (gitignored).
+# The hash is of the committed blob (git cat-file blob HEAD:mlflow.db), checked before copying.
+M1_SNAPSHOT_DB: Path = ROOT_DIR / "mlflow.db"
+M1_SNAPSHOT_ARTIFACT_DIR: Path = ROOT_DIR / "mlruns"
+M1_SNAPSHOT_DB_SHA256: str = "fadc3edc61edd90dde3ce0031fa9d698402d3d88a22c7534cf860a53427d8bbd"
+M1_SNAPSHOT_WORKDIR: Path = ROOT_DIR / "mlflow_m1"
+
 MLFLOW_EXPERIMENT_NAME: str = "dgalert-m1"
 MODEL_TYPES: list[str] = ["logreg", "rf", "gb"]  # one MLflow parent run each (tag model_type)
 PER_FAMILY_FILE: str = "per_family_recall.json"  # MLflow artifact name in every parent run
 
 # Results copied out of MLflow into the repo (MLflow artifact paths are machine-specific).
-# Built by src/report.py from the latest finished parent run of each model type; committed.
+# Built by src/report.py from the M1 snapshot (latest finished parent run of each model type) and
+# from the run of the production model; committed.
 REPORTS_DIR: Path = ROOT_DIR / "reports"
 RESULTS_REPORT_PATH: Path = REPORTS_DIR / "m1_results.json"
 PER_FAMILY_REPORT_PATH: Path = REPORTS_DIR / "per_family_recall.json"
+PRODUCTION_REPORT_PATH: Path = REPORTS_DIR / "production_model.json"
+
+
+def sqlite_uri(db_path: Path) -> str:
+    """sqlite:/// tracking URI for a database file."""
+    return f"sqlite:///{Path(db_path).as_posix()}"
+
+
+def mlflow_tracking_uri() -> str:
+    """Tracking URI for new runs: $DGALERT_MLFLOW_TRACKING_URI, else the local store."""
+    return os.environ.get(TRACKING_URI_ENV_VAR) or sqlite_uri(MLFLOW_LOCAL_DB)
+
+
+def mlflow_artifact_dir() -> Path:
+    """Artifact folder for new runs: $DGALERT_MLFLOW_ARTIFACT_DIR, else the local store's."""
+    value = os.environ.get(ARTIFACT_DIR_ENV_VAR)
+    if not value:
+        return MLFLOW_LOCAL_ARTIFACT_DIR
+    path = Path(value)
+    return path if path.is_absolute() else ROOT_DIR / path

@@ -33,7 +33,9 @@ flowchart LR
     TR --> TN["src/train.py<br/>logreg · rf · gb (grid search)"]
     TS --> TN
     TF --> TN
-    TN <--> ML[("MLflow<br/>mlflow.db + mlruns/")]
+    TN <--> ML[("MLflow local store<br/>mlflow_local/ (gitignored)")]
+    M1[("M1 snapshot<br/>mlflow.db + mlruns/<br/>committed, read-only")] -. "copy (src.m1_snapshot)" .-> RP["src/report.py"]
+    RP --> R[("reports/")]
     TN --> M["models/model_&lt;version&gt;.joblib<br/>+ models/latest.json<br/>(local candidate, gitignored)"]
     PR[("models/production/<br/>model + latest.json<br/>committed")] --> API["src/app.py (FastAPI)<br/>/predict · /explain · /health · /stats"]
     M -. "MODEL_POINTER=models/latest.json" .-> API
@@ -62,7 +64,10 @@ venv\Scripts\python -m pytest -q
 
 venv\Scripts\python -m src.prepare_data          # writes data/processed/
 venv\Scripts\python -m src.train --model all     # trains logreg, rf, gb; writes models/latest.json
-venv\Scripts\mlflow ui --backend-store-uri sqlite:///mlflow.db   # run history at http://127.0.0.1:5000
+venv\Scripts\mlflow ui --backend-store-uri sqlite:///mlflow_local/mlflow.db   # your runs, http://127.0.0.1:5000
+
+venv\Scripts\python -m src.m1_snapshot             # copy of the M1 runs; prints its `mlflow ui` command
+venv\Scripts\python -m src.report                  # rebuilds reports/ (needs data/processed/)
 ```
 
 Training takes about 11 minutes. Most of it is the gradient boosting model: about 6 minutes of grid
@@ -76,13 +81,46 @@ Linux/macOS equivalents (see `Makefile`):
 | venv + install | `make setup` |
 | prepare data | `make data` |
 | train (all models) | `make train` |
+| rebuild `reports/` | `make report` |
+| browse the M1 runs (copy + `mlflow ui` command) | `make mlflow-m1` |
 | tests | `make test` |
 | ruff lint + format check | `make lint` |
 | serve the API (with `--reload`) | `make serve` |
 
-Training adds runs to the committed MLflow store (`mlflow.db`, `mlruns/`) and rebuilds `reports/`.
+Training logs to a local, gitignored MLflow store in `mlflow_local/` and does not touch `reports/`.
 `models/latest.json` is only replaced when the new best model has a strictly higher `f1_seen` than
 the current one (`python -m src.train --force` overrides this).
+
+### MLflow stores and reports
+
+| Store | Where | Written by |
+|---|---|---|
+| Local store (new runs) | `mlflow_local/mlflow.db` + `mlflow_local/mlruns/`, gitignored | `src.train` |
+| M1 snapshot | `mlflow.db` + `mlruns/`, committed | nothing: read-only |
+| M1 working copy | `mlflow_m1/`, gitignored | `src.m1_snapshot`, `src.report` |
+
+- **New runs** go to the local store. Set `DGALERT_MLFLOW_TRACKING_URI` (and, for a SQLite store,
+  `DGALERT_MLFLOW_ARTIFACT_DIR`) to log elsewhere, e.g. a CI workspace. The names are prefixed so a
+  global `MLFLOW_TRACKING_URI` set for another project cannot redirect DGAlert runs. Training
+  refuses to write to the committed `mlflow.db`.
+- **The M1 snapshot** (`mlflow.db`, `mlruns/`) holds the Milestone 1 runs and is never written
+  again. Its SHA-256 is recorded in `src/config.py` (`M1_SNAPSHOT_DB_SHA256`) and the test suite
+  fails if it changes. To browse it, make a working copy:
+
+  ```powershell
+  venv\Scripts\python -m src.m1_snapshot
+  ```
+
+  This checks the hash, copies the store to `mlflow_m1/` (replacing any earlier copy), rewrites the
+  copy's artifact paths for this machine (MLflow stores them as absolute paths) and prints the
+  `mlflow ui --backend-store-uri sqlite:///.../mlflow_m1/mlflow.db --port 5000` command to run.
+- **`python -m src.report`** rebuilds `reports/` from a fresh working copy: `m1_results.json` and
+  `per_family_recall.json` compare the three M1 parent runs, and `production_model.json` describes
+  the model the API serves. It finds the MLflow run named by `mlflow_run_id` in
+  `models/production/latest.json`, in the local store or the M1 snapshot, and records its params,
+  metrics and per-family recall, plus the store's label (`local` or `m1_snapshot`). It
+  needs `data/processed/split_report.json` (`python -m src.prepare_data`). The files contain no
+  timestamps or paths, so rerunning it leaves `git status` clean.
 
 ### Production model and requirements
 
@@ -478,9 +516,9 @@ the label and probability:
   Threshold-independent metrics (ROC-AUC) and a separate validation split for model selection are
   planned for Milestone 2.
 
-MLflow saves artifact locations as absolute paths, so `src.train` and `src.report` first rewrite
-the `dgalert-m1` paths in the committed `mlflow.db` to this clone's `mlruns/`
-(`src/mlflow_store.py`); after either has run once, `mlflow ui` artifact links work on any machine.
+MLflow saves artifact locations as absolute paths, so the committed M1 store is only read through
+a working copy whose paths are rewritten for this machine (`src/m1_snapshot.py`,
+`src/mlflow_store.py`); see [MLflow stores and reports](#mlflow-stores-and-reports).
 
 ## Tests
 
@@ -494,10 +532,11 @@ CI (GitHub Actions, Ubuntu, Python 3.13) runs the same three commands on every p
 
 | File | Covers |
 |---|---|
-| `tests/test_config.py` | paths inside the repo, MLflow tracking URI, seed, family lists disjoint |
+| `tests/test_config.py` | paths inside the repo, local MLflow store and its env-var overrides, working folders gitignored, seed, family lists disjoint |
 | `tests/test_features.py` | normalization, second-level label extraction, every feature, dictionary split |
 | `tests/test_prepare_data.py` | validation drops, grouped split with no shared labels, held-out families only in test_future, identical output on a rerun |
-| `tests/test_train.py` | training on a tiny fixture, MLflow runs, `latest.json` promotion (with `sha256`) and `--force`, report generation |
+| `tests/test_train.py` | training on a tiny fixture, MLflow runs, `latest.json` promotion (with `sha256`) and `--force`, report generation, training refuses the committed store and never writes `reports/`, `production_model.json` lookup across stores (deterministic, no paths or times) |
+| `tests/test_m1_snapshot.py` | the committed `mlflow.db` hash and `mlruns/` unchanged after the viewer command, the copy relocated and refreshed, a changed snapshot refused, `reports/` rebuilt from the snapshot equal to the committed files (parsed JSON) |
 | `tests/test_model_loader.py` | loading via `latest.json`, the `MODEL_POINTER` override, missing or malformed pointers, SHA-256 check (tampered file refused, missing hash warns), scikit-learn version warning, the committed production model (fields, hash, loading from another working directory) |
 | `tests/test_app.py` | `/health` and `/predict`: success, 503 without a model or with a tampered model, every 422 validation rule |
 | `tests/test_monitoring.py` | `/stats` counts per endpoint and status class, latency, label counts matching `/predict`, `unmatched` paths, reset on restart, working without a model; thread-safe counters; one JSON log line per request with no request body |
@@ -506,6 +545,8 @@ CI (GitHub Actions, Ubuntu, Python 3.13) runs the same three commands on every p
 
 The tests run from a clean clone with no `data/raw/`, `data/processed/` or trained candidate in
 `models/`: they train tiny models on `data/sample/` or on synthetic data in a temporary folder.
+They read the committed M1 snapshot only through copies in a temporary folder, and the run fails
+if the committed `mlflow.db` hash changes.
 
 Tests marked `@pytest.mark.sanity` check the committed production model in `models/production/`
 (e.g. `teco.com.tw` is benign, `moiqidfvjjhjmndqp.in` is dga). They always run, in CI too. Run them

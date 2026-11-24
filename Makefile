@@ -4,13 +4,15 @@
 #   setup:  py -3.13 -m venv venv ; venv\Scripts\python -m pip install -r requirements.txt
 #   data:   venv\Scripts\python -m src.prepare_data
 #   train:  venv\Scripts\python -m src.train
+#   report: venv\Scripts\python -m src.report
+#   mlflow-m1: venv\Scripts\python -m src.m1_snapshot
 #   test:   venv\Scripts\python -m pytest -q
 #   lint:   venv\Scripts\ruff check src tests scripts ; venv\Scripts\ruff format --check src tests scripts
 #   serve:  venv\Scripts\python -m uvicorn src.app:app --reload
 
 PY := venv/bin/python
 
-.PHONY: setup data train test lint serve
+.PHONY: setup data train report mlflow-m1 test lint serve
 
 setup:
 	test -d venv || python3.13 -m venv venv
@@ -21,6 +23,13 @@ data:
 
 train:
 	$(PY) -m src.train
+
+report:
+	$(PY) -m src.report
+
+# Copy the read-only M1 MLflow store to mlflow_m1/ and print the `mlflow ui` command
+mlflow-m1:
+	$(PY) -m src.m1_snapshot
 
 test:
 	$(PY) -m pytest -q

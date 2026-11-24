@@ -35,7 +35,7 @@ flowchart LR
     TF --> TN
     TN <--> ML[("MLflow<br/>mlflow.db + mlruns/")]
     TN --> M["models/model_&lt;version&gt;.joblib<br/>+ models/latest.json<br/>(local candidate, gitignored)"]
-    PR[("models/production/<br/>model + latest.json<br/>committed")] --> API["src/app.py (FastAPI)<br/>/predict · /explain · /health"]
+    PR[("models/production/<br/>model + latest.json<br/>committed")] --> API["src/app.py (FastAPI)<br/>/predict · /explain · /health · /stats"]
     M -. "MODEL_POINTER=models/latest.json" .-> API
 ```
 
@@ -316,6 +316,14 @@ range, and logreg (trained only on the 8 basic character features) flags every d
 
 ## API
 
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/predict` | Classify one domain: `label` (`benign` or `dga`) and P(dga) |
+| `POST` | `/explain` | The same prediction plus the top 5 SHAP feature contributions |
+| `GET` | `/health` | 200 when the model is loaded, 503 otherwise (used by health checks) |
+| `GET` | `/stats` | Request counts, latency and prediction statistics since the service started |
+| `GET` | `/docs` | Interactive OpenAPI docs with request and response examples |
+
 Start the server, then open **http://127.0.0.1:8000/docs** for the interactive OpenAPI docs (with
 request and response examples):
 
@@ -388,6 +396,53 @@ curl http://127.0.0.1:8000/health
 
 Without a model it returns HTTP 503 with `{"status": "unhealthy", "model_loaded": false}`.
 
+### `GET /stats`
+
+Monitoring counters since the service started. It always returns 200, also without a model
+(`model_version` is then `null`).
+
+```bash
+curl http://127.0.0.1:8000/stats
+```
+
+```json
+{
+  "model_version": "20261105_062411",
+  "started_at": "2026-11-25T09:00:00.000+00:00",
+  "uptime_seconds": 123.456,
+  "requests": {
+    "total": 6,
+    "by_status_class": {"2xx": 5, "4xx": 1},
+    "avg_latency_ms": 7.512,
+    "by_endpoint": {
+      "GET /health": {"count": 2, "by_status_class": {"2xx": 2}, "avg_latency_ms": 0.811},
+      "POST /predict": {"count": 4, "by_status_class": {"2xx": 3, "4xx": 1}, "avg_latency_ms": 10.863}
+    }
+  },
+  "predictions": {"count": 3, "by_label": {"benign": 2, "dga": 1}, "mean_probability_dga": 0.3349}
+}
+```
+
+- `requests` counts every request, per status class (`2xx`, `4xx`, ...) and per endpoint, keyed by
+  method and route. Requests that match no route (e.g. scans for `/wp-admin`) are grouped under
+  `unmatched`. Latency is measured in the service, from request in to response out.
+- `predictions` covers successful `POST /predict` calls only (`/explain` is not counted):
+  the count per label and the mean P(dga).
+- **Counters are in memory and reset whenever the service restarts.** On Render's free tier an
+  idle service is put to sleep and restarted on the next request, so `started_at` shows how long
+  the counters cover. The `/stats` call itself is counted after its response is built.
+- **Health checks inflate `requests.total`.** Docker's `HEALTHCHECK` and Render's health checks call
+  `/health` regularly, so the totals rise with no user traffic. For demos, read `POST /predict`
+  under `by_endpoint` and the `predictions` block.
+
+Every request also writes one JSON line to stdout (logger `dgalert.access`), next to uvicorn's own
+access line. Request bodies are never logged, so the domain does not appear; `/predict` adds only
+the label and probability:
+
+```json
+{"timestamp": "2026-11-25T09:00:01.234+00:00", "method": "POST", "path": "/predict", "status": 200, "latency_ms": 9.81, "label": "dga", "probability": 0.996}
+```
+
 ## Limitations
 
 - **Purely lexical features.** The model sees only the characters of the second-level label: no
@@ -445,6 +500,7 @@ CI (GitHub Actions, Ubuntu, Python 3.13) runs the same three commands on every p
 | `tests/test_train.py` | training on a tiny fixture, MLflow runs, `latest.json` promotion (with `sha256`) and `--force`, report generation |
 | `tests/test_model_loader.py` | loading via `latest.json`, the `MODEL_POINTER` override, missing or malformed pointers, SHA-256 check (tampered file refused, missing hash warns), scikit-learn version warning, the committed production model (fields, hash, loading from another working directory) |
 | `tests/test_app.py` | `/health` and `/predict`: success, 503 without a model or with a tampered model, every 422 validation rule |
+| `tests/test_monitoring.py` | `/stats` counts per endpoint and status class, latency, label counts matching `/predict`, `unmatched` paths, reset on restart, working without a model; thread-safe counters; one JSON log line per request with no request body |
 | `tests/test_explain.py` | `/explain` shape and agreement with `/predict`; SHAP additivity for gb, rf and the logreg fallback |
 | `tests/test_hyphen_evasion.py` | hyphen insertion in `scripts/hyphen_evasion.py` keeps the suffix and splits the label in the middle |
 

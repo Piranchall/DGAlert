@@ -1,24 +1,33 @@
-"""FastAPI service exposing /predict, /explain and /health. Interactive docs at /docs.
+"""FastAPI service exposing /predict, /explain, /health and /stats. Interactive docs at /docs.
 
 Run with: uvicorn src.app:app
 """
 
 import logging
 import re
-from collections.abc import AsyncIterator
+import time
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from starlette.routing import Match
 
 from src import config
 from src.explain import DomainExplainer, build_explainer
 from src.features import feature_frame, normalize_domain, public_suffix, second_level_label
 from src.model_loader import load_model
+from src.monitoring import (
+    UNMATCHED_ENDPOINT,
+    StatsCollector,
+    access_log_line,
+    configure_access_logger,
+)
 
 logger = logging.getLogger(__name__)
+access_logger = configure_access_logger()
 
 MAX_DOMAIN_LENGTH = 253
 MAX_LABEL_LENGTH = 63
@@ -153,6 +162,71 @@ class HealthResponse(BaseModel):
     model_version: str | None = None
 
 
+class EndpointStats(BaseModel):
+    count: int
+    by_status_class: dict[str, int] = Field(description='Counts per status class, e.g. "2xx".')
+    avg_latency_ms: float | None = Field(description="Mean latency; null before any request.")
+
+
+class RequestStats(BaseModel):
+    total: int = Field(description="All requests, including /health checks and /stats itself.")
+    by_status_class: dict[str, int]
+    avg_latency_ms: float | None
+    by_endpoint: dict[str, EndpointStats] = Field(
+        description='Keyed by "METHOD /route"; requests that match no route are "unmatched".'
+    )
+
+
+class PredictionStats(BaseModel):
+    count: int = Field(description="Successful /predict calls (/explain is not counted).")
+    by_label: dict[str, int]
+    mean_probability_dga: float | None = Field(
+        description="Mean P(dga) over those predictions; null before the first one."
+    )
+
+
+class StatsResponse(BaseModel):
+    model_version: str | None = Field(description="null when no model is loaded.")
+    started_at: str = Field(description="UTC start time of this process; counters start here.")
+    uptime_seconds: float
+    requests: RequestStats
+    predictions: PredictionStats
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "model_version": "20261105_062411",
+                    "started_at": "2026-11-25T09:00:00.000+00:00",
+                    "uptime_seconds": 123.456,
+                    "requests": {
+                        "total": 6,
+                        "by_status_class": {"2xx": 5, "4xx": 1},
+                        "avg_latency_ms": 7.512,
+                        "by_endpoint": {
+                            "GET /health": {
+                                "count": 2,
+                                "by_status_class": {"2xx": 2},
+                                "avg_latency_ms": 0.811,
+                            },
+                            "POST /predict": {
+                                "count": 4,
+                                "by_status_class": {"2xx": 3, "4xx": 1},
+                                "avg_latency_ms": 10.863,
+                            },
+                        },
+                    },
+                    "predictions": {
+                        "count": 3,
+                        "by_label": {"benign": 2, "dga": 1},
+                        "mean_probability_dga": 0.3349,
+                    },
+                }
+            ]
+        }
+    )
+
+
 # ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
@@ -164,6 +238,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.model = None
     app.state.metadata = {}
     app.state.explainer = None
+    app.state.stats = StatsCollector()  # in memory: counters reset on every start
     try:
         app.state.model, app.state.metadata = load_model()
         logger.info("Loaded model version %s", app.state.metadata["version"])
@@ -184,6 +259,48 @@ label (`mail.google.co.uk` -> `google`). A domain is labelled `dga` when P(dga) 
 """
 
 app = FastAPI(title="DGAlert", description=DESCRIPTION, version="1.0.0", lifespan=lifespan)
+
+
+def endpoint_key(request: Request) -> str:
+    """ "METHOD /route/template" for the route that served the request, else "unmatched".
+
+    Using the template (not the raw path) keeps the number of keys bounded, e.g. under 404 scans.
+    FastAPI's own /docs and /openapi.json routes do not set scope["route"], so match them here.
+    """
+    route = request.scope.get("route")
+    if route is None:
+        route = next(
+            (r for r in request.app.router.routes if r.matches(request.scope)[0] == Match.FULL),
+            None,
+        )
+    if route is None:
+        return UNMATCHED_ENDPOINT
+    return f"{request.method} {route.path}"
+
+
+@app.middleware("http")
+async def record_stats(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    """Time every request, update /stats and write one JSON access log line."""
+    start = time.perf_counter()
+    status_code = 500  # if the handler raises, the client gets a 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        latency_ms = (time.perf_counter() - start) * 1000
+        prediction = getattr(request.state, "prediction", None)
+        stats: StatsCollector | None = getattr(request.app.state, "stats", None)
+        if stats is not None:
+            stats.record_request(endpoint_key(request), status_code, latency_ms)
+            if prediction is not None:
+                stats.record_prediction(prediction["label"], prediction["probability"])
+        access_logger.info(
+            access_log_line(request.method, request.url.path, status_code, latency_ms, prediction)
+        )
+
 
 NOT_LOADED = "Model not loaded; the server log gives the reason (e.g. a failed SHA-256 check)."
 EXPLAIN_TOP_K = 5
@@ -228,7 +345,10 @@ def classify(model: Any, domain: str, request: Request) -> PredictResponse:
 )
 def predict(body: PredictRequest, request: Request) -> PredictResponse:
     """Classify one domain as benign or dga."""
-    return classify(get_model(request), body.domain, request)
+    response = classify(get_model(request), body.domain, request)
+    # Read by the stats middleware: counted in /stats and logged (never the domain itself).
+    request.state.prediction = {"label": response.label, "probability": response.probability}
+    return response
 
 
 @app.post(
@@ -266,3 +386,15 @@ def health(request: Request) -> HealthResponse | JSONResponse:
         model_loaded=True,
         model_version=str(request.app.state.metadata["version"]),
     )
+
+
+@app.get("/stats", response_model=StatsResponse)
+def stats(request: Request) -> StatsResponse:
+    """Request counts, latency and /predict label statistics since this process started.
+
+    Counters are kept in memory and reset when the service restarts. Health checks call /health
+    regularly, so requests.total rises on its own; read "POST /predict" under by_endpoint.
+    """
+    snapshot = request.app.state.stats.snapshot()
+    version = request.app.state.metadata.get("version") if request.app.state.model else None
+    return StatsResponse(model_version=None if version is None else str(version), **snapshot)

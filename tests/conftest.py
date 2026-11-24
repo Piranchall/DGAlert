@@ -80,3 +80,12 @@ def client(model_pointer: Path) -> Iterator[TestClient]:
     """
     with TestClient(app) as test_client:
         yield test_client
+
+
+@pytest.fixture(scope="session", autouse=True)
+def committed_mlflow_store_is_never_written() -> Iterator[None]:
+    """Fail the run if any test changed the committed M1 snapshot (mlflow.db is read-only)."""
+    yield
+    assert file_sha256(config.M1_SNAPSHOT_DB) == config.M1_SNAPSHOT_DB_SHA256, (
+        "a test modified the committed mlflow.db; restore it with: git restore mlflow.db"
+    )

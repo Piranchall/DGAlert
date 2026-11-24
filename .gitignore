@@ -17,4 +17,9 @@ models/*
 !models/.gitkeep
 !models/production/
 
-# NOTE: the MLflow store (mlflow.db, mlruns/) is committed on purpose so graders can see run history.
+# NOTE: the M1 MLflow store (mlflow.db, mlruns/) is committed on purpose so graders can see run
+# history. It is a read-only snapshot: new runs go to mlflow_local/ (see src/config.py).
+
+# MLflow stores for new runs and the working copy of the M1 snapshot (src.m1_snapshot)
+mlflow_local/
+mlflow_m1/

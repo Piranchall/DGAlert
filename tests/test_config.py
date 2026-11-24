@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from src import config
 
 PATHS_IN_REPO = [
@@ -23,8 +25,12 @@ PATHS_IN_REPO = [
     config.SPLIT_REPORT_PATH,
     config.MODELS_DIR,
     config.LATEST_MODEL_POINTER,
-    config.MLFLOW_DB_PATH,
-    config.MLFLOW_ARTIFACT_DIR,
+    config.MLFLOW_LOCAL_DB,
+    config.MLFLOW_LOCAL_ARTIFACT_DIR,
+    config.M1_SNAPSHOT_DB,
+    config.M1_SNAPSHOT_ARTIFACT_DIR,
+    config.M1_SNAPSHOT_WORKDIR,
+    config.PRODUCTION_REPORT_PATH,
 ]
 
 
@@ -47,11 +53,33 @@ def test_committed_folders_exist() -> None:
         assert folder.is_dir(), f"{folder} is missing"
 
 
-def test_mlflow_tracking_uri_points_to_repo_sqlite_db() -> None:
-    assert config.MLFLOW_TRACKING_URI.startswith("sqlite:///")
-    db_path = Path(config.MLFLOW_TRACKING_URI.removeprefix("sqlite:///"))
-    assert db_path == config.MLFLOW_DB_PATH
+def test_new_runs_default_to_the_local_store(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(config.TRACKING_URI_ENV_VAR, raising=False)
+    monkeypatch.delenv(config.ARTIFACT_DIR_ENV_VAR, raising=False)
+    uri = config.mlflow_tracking_uri()
+    assert uri.startswith("sqlite:///")
+    assert Path(uri.removeprefix("sqlite:///")) == config.MLFLOW_LOCAL_DB
+    assert config.mlflow_artifact_dir() == config.MLFLOW_LOCAL_ARTIFACT_DIR
+    assert config.MLFLOW_LOCAL_DB != config.M1_SNAPSHOT_DB
     assert config.MLFLOW_EXPERIMENT_NAME == "dgalert-m1"
+
+
+def test_mlflow_env_vars_override_the_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(config.TRACKING_URI_ENV_VAR, "sqlite:///elsewhere/mlflow.db")
+    monkeypatch.setenv(config.ARTIFACT_DIR_ENV_VAR, str(tmp_path / "artifacts"))
+    assert config.mlflow_tracking_uri() == "sqlite:///elsewhere/mlflow.db"
+    assert config.mlflow_artifact_dir() == tmp_path / "artifacts"
+
+    monkeypatch.setenv(config.ARTIFACT_DIR_ENV_VAR, "relative/artifacts")
+    assert config.mlflow_artifact_dir() == config.ROOT_DIR / "relative/artifacts"
+
+
+def test_mlflow_working_folders_are_gitignored() -> None:
+    ignored = (config.ROOT_DIR / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert "mlflow_local/" in ignored
+    assert "mlflow_m1/" in ignored
 
 
 def test_reproducibility_constants() -> None:

@@ -12,7 +12,12 @@ columns (logreg selects its own subset inside its pipeline), so callers never ne
 which features a model uses. models/latest.json points at the run with the best f1_seen.
 
 latest.json is only replaced when the new best run has a strictly higher f1_seen than the run it
-points to now (or with --force). After training, reports/ is rebuilt from MLflow (src/report.py).
+points to now (or with --force).
+
+Runs go to the local, gitignored MLflow store (mlflow_local/) unless DGALERT_MLFLOW_TRACKING_URI /
+DGALERT_MLFLOW_ARTIFACT_DIR say otherwise; the committed M1 snapshot (mlflow.db, mlruns/) is never
+written. Training does not touch reports/: those describe the production model and the M1 runs and
+are rebuilt with python -m src.report.
 
 Run with: python -m src.train --model all   (or logreg / rf / gb; add --force to always promote)
 """
@@ -38,7 +43,6 @@ from src import config
 from src.features import FEATURE_NAMES
 from src.mlflow_store import relocate_mlflow_store, sqlite_db_path
 from src.model_loader import file_sha256
-from src.report import write_reports
 
 # Character-level features only: no dictionary and no n-gram features.
 BASIC_FEATURES: list[str] = [
@@ -339,11 +343,19 @@ def promote_if_better(candidate: dict, pointer: Path, force: bool = False) -> bo
 def setup_mlflow(tracking_uri: str, artifact_dir: Path, experiment_name: str) -> None:
     """Point MLflow at the given store and create the experiment if it does not exist yet.
 
-    A committed SQLite store is first relocated to this machine's artifact_dir (src.mlflow_store).
+    Refuses the committed M1 snapshot (it is read-only). A SQLite store copied from another
+    machine is first relocated to this machine's artifact_dir (src.mlflow_store).
     """
     db_path = sqlite_db_path(tracking_uri)
-    if db_path is not None and relocate_mlflow_store(db_path, artifact_dir, experiment_name):
-        print(f"MLflow store: artifact location of {experiment_name!r} moved to {artifact_dir}")
+    if db_path is not None:
+        if db_path.resolve() == config.M1_SNAPSHOT_DB.resolve():
+            raise ValueError(
+                f"{db_path} is the committed M1 snapshot and must not be written; "
+                f"unset {config.TRACKING_URI_ENV_VAR} to use the local store"
+            )
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        if relocate_mlflow_store(db_path, artifact_dir, experiment_name):
+            print(f"MLflow store: artifact location of {experiment_name!r} moved to {artifact_dir}")
     mlflow.set_tracking_uri(tracking_uri)
     if mlflow.get_experiment_by_name(experiment_name) is None:
         mlflow.create_experiment(experiment_name, artifact_location=artifact_dir.as_uri())
@@ -355,15 +367,22 @@ def run_training(
     processed_dir: Path = config.PROCESSED_DIR,
     models_dir: Path = config.MODELS_DIR,
     pointer: Path = config.LATEST_MODEL_POINTER,
-    tracking_uri: str = config.MLFLOW_TRACKING_URI,
-    artifact_dir: Path = config.MLFLOW_ARTIFACT_DIR,
+    tracking_uri: str | None = None,
+    artifact_dir: Path | None = None,
     experiment_name: str = config.MLFLOW_EXPERIMENT_NAME,
     gb_grid: dict[str, list] = GB_GRID,
     gb_max_rows: int = GB_CV_MAX_ROWS,
     force: bool = False,
 ) -> list[dict]:
-    """Train each model type, then promote the best f1_seen result if it beats latest.json."""
+    """Train each model type, then promote the best f1_seen result if it beats latest.json.
+
+    tracking_uri and artifact_dir default to config.mlflow_tracking_uri() / mlflow_artifact_dir()
+    (the local store, or the DGALERT_MLFLOW_* env vars), read at call time.
+    """
     splits = load_splits(processed_dir)
+    tracking_uri = tracking_uri or config.mlflow_tracking_uri()
+    artifact_dir = artifact_dir or config.mlflow_artifact_dir()
+    print(f"MLflow store: {tracking_uri}")
     setup_mlflow(tracking_uri, artifact_dir, experiment_name)
     results = [
         train_one(model_type, splits, models_dir, gb_grid, gb_max_rows)
@@ -418,8 +437,7 @@ def main() -> None:
     held_out = held_out_recall_table(results).sort_values(best)
     print(f"\n5 held-out families with the lowest recall (sorted by {best}, the best model):")
     print(held_out.head(5).to_string())
-
-    write_reports()
+    print("\nreports/ is not changed by training; rebuild it with: python -m src.report")
 
 
 if __name__ == "__main__":

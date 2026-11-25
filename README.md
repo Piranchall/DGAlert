@@ -87,6 +87,7 @@ Linux/macOS equivalents (see `Makefile`):
 | retraining data (after `make data`) | `make retrain-data` |
 | one retraining round, dry run (after `make retrain-data`) | `make retrain-dry-run` |
 | train (all models) | `make train` |
+| feature-set ablation, about 3 min (after `make data`) | `make ablation` |
 | rebuild `reports/` | `make report` |
 | browse the M1 runs (copy + `mlflow ui` command) | `make mlflow-m1` |
 | tests | `make test` |
@@ -407,6 +408,29 @@ Two caveats about the tuning:
 - **gb's `train_time_s` (261.2648) is the final refit only.** The grid search before it is not
   included. By the MLflow run timestamps it ran for 357 s of the 622 s gb run, which makes it the
   biggest single part of the ~11-minute training.
+
+### Feature-set ablation (Milestone 2)
+
+The table above compares logreg on 8 basic features with trees on all 15, so it mixes the model
+family with the feature set. `python -m scripts.ablation` (`make ablation`) fits the full 2 x 2
+grid on the same M1 splits: logreg with the M1 parameters, gb with M1's best grid point, each on the
+8 basic and on all 15 features. Each cell is an MLflow run in experiment `dgalert-m2-ablation`
+(local store); the results, overall and per family, are in `reports/ablation.json`.
+
+| Model | Features | f1_seen | recall_future | dyre recall | matsnu recall |
+|---|---|---|---|---|---|
+| logreg | 8 basic (M1) | 0.7635 | 0.8003 | 1.0 | 0.0587 |
+| logreg | all 15 | 0.8291 | 0.8194 | 1.0 | 0.0123 |
+| gb | 8 basic | 0.7861 | 0.6771 | 0.2753 | 0.0207 |
+| gb | all 15 (M1, production) | 0.8891 | 0.7885 | 0.646 | 0.0494 |
+
+- The two M1 cells reproduce M1 exactly (every metric and every per-family recall).
+- The dictionary and n-gram features help both models: +0.0656 `f1_seen` for logreg, +0.103 for
+  gb. With the same 15 features gb still leads logreg by 0.06 `f1_seen`.
+- logreg catches every dyre label with either feature set. gb catches fewer dyre labels with the
+  8 basic features (0.2753) than with all 15 (0.646).
+
+The comparison and the dyre explanation below are revised in slice S13.
 
 ### Per-family recall (gb)
 
@@ -807,6 +831,7 @@ docker run --rm -p 8000:8000 ghcr.io/piranchall/dgalert:main
 | `tests/test_train.py` | training on a tiny fixture, MLflow runs, `latest.json` promotion (with `sha256`) and `--force`, report generation, training refuses the committed store and never writes `reports/`, `production_model.json` lookup across stores (deterministic, no paths or times) |
 | `tests/test_m1_snapshot.py` | the committed `mlflow.db` hash and `mlruns/` unchanged after the viewer command, the copy relocated and refreshed, a changed snapshot refused, `reports/` rebuilt from the snapshot equal to the committed files (parsed JSON); `reports/production_model.json` matches the production pointer (rebuilt from the snapshot while production is the M1 model) |
 | `tests/test_retrain.py` | round planning (next batch, partly phased-in batch refused), training rows, fixed HGB parameters match the search; one round on a small setup from `data/sample` with a temporary production folder and MLflow store: promotion replaces the model (old file deleted, loader and explainer accept the new one, `round` and `phased_in_families` updated, production report from the run), rejection and dry run leave production byte-identical, a second round with earlier families, nothing left to phase in, real gate reasons and MLflow run, frozen-hash mismatch rejects; workflow outputs and Markdown report |
+| `tests/test_ablation.py` | the 2 x 2 grid; each pipeline uses exactly its feature set (scrambling the other columns changes nothing), logreg on the basic features is M1's pipeline, gb parameters from M1's best grid point; on small splits from `data/sample`: every cell with overall and per-family numbers, effects computed from the cells, a byte-identical report on a rerun with no run ids, times or paths, one MLflow run per cell, every M1 mismatch listed |
 | `tests/test_retrain_workflow.py` | `retrain.yml`: manual dispatch defaults to a dry run, the weekly schedule is always dry, real rounds only on `main`, read-only permissions, step order, the committed frozen report not overwritten, artifact always uploaded, open round PR not duplicated, PR only on a real promotion with `RETRAIN_PR_TOKEN` (title, contents, bot commit, reviewer is the other member), no expressions inside shell scripts |
 | `tests/test_model_loader.py` | loading via `latest.json`, the `MODEL_POINTER` override, missing or malformed pointers, SHA-256 check (tampered file refused, missing hash warns), scikit-learn version warning, the committed production model (fields, hash, loading from another working directory) |
 | `tests/test_app.py` | `/health` and `/predict`: success, 503 without a model or with a tampered model, every 422 validation rule |

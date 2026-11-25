@@ -93,7 +93,8 @@ Linux/macOS equivalents (see `Makefile`):
 
 Training logs to a local, gitignored MLflow store in `mlflow_local/` and does not touch `reports/`.
 `models/latest.json` is only replaced when the new best model has a strictly higher `f1_seen` than
-the current one (`python -m src.train --force` overrides this).
+the current one (`python -m src.train --force` overrides this). That rule is for reproducing
+Milestone 1; retraining promotes through the [promotion gate](#promotion-gate-milestone-2).
 
 ### MLflow stores and reports
 
@@ -261,6 +262,34 @@ the three splits above, which it does not change:
 
 The control families are never phased in. Their recall cannot rise by the gate's margin, and
 keeping them unseen still measures how the model does on families it was never trained on.
+
+### Promotion gate (Milestone 2)
+
+`src/gate.py` decides whether a retrained model (the challenger) replaces the production model
+(the champion). It scores **both** models on the same rows of the frozen eval set and never
+compares stored numbers. The challenger is promoted only if all six criteria hold (thresholds in
+`src/config.py`, boundaries inclusive):
+
+| # | Criterion | Measured on | Rule |
+|---|---|---|---|
+| 1 | frozen eval hash | the whole frozen eval set | equals `sha256` in `reports/eval_frozen.json` |
+| 2 | new-family recall | DGA rows of the families added this round, pooled | rises by at least 0.02 |
+| 3 | seen F1 | the `test_seen` rows (training families + benign) | drops by at most 0.01 |
+| 4 | false-positive rate | benign rows flagged as dga | rises by at most 0.005 |
+| 5 | earlier-family recall | DGA rows of families phased in during earlier rounds, pooled | drops by at most 0.02; passes when there are none (round 1) |
+| 6 | sanity domains | `config.SANITY_DOMAINS` (the same list as the sanity tests) | all classified correctly |
+
+Criterion 5 is **added beyond the slice plan's five**. Families phased in earlier are held-out
+families, so their rows are not among the seen-F1 rows at all: without it, losing a ~600-row
+earlier family completely would leave seen F1 unchanged and move F1 over all ~46.8k frozen rows
+only slightly.
+
+All six are always evaluated, so a rejection lists every failed criterion. The decision (JSON) has
+`promote`, `failed`, one entry per criterion (champion and challenger values, delta, threshold,
+message), and both models' metrics side by side: overall precision, recall and F1, seen F1,
+new-family and earlier-family recall, false-positive rate, recall per family, and the sanity
+labels. `src/train.py`'s `promote_if_better` (higher stored `f1_seen`) stays for reproducing
+Milestone 1 only.
 
 ## Results
 
@@ -711,6 +740,7 @@ docker run --rm -p 8000:8000 ghcr.io/piranchall/dgalert:main
 | `tests/test_config.py` | paths inside the repo, local MLflow store and its env-var overrides, working folders gitignored, seed, family lists disjoint |
 | `tests/test_features.py` | normalization, second-level label extraction, every feature, dictionary split |
 | `tests/test_prepare_data.py` | validation drops, grouped split with no shared labels, held-out families only in test_future, identical output on a rerun |
+| `tests/test_gate.py` | promote; reject on each of the six criteria alone; several failures all listed; inclusive boundaries; earlier-family criterion passes with no earlier families and catches a collapse that seen F1 misses; stored metrics ignored; committed hash used by default; configuration errors raise; deterministic JSON; end to end with two small real models on `data/sample` |
 | `tests/test_prepare_retrain.py` | hash rule and content-hash format, parts cover the inputs, no label shared between any two parts, about 10% / 20% per family, output independent of row order, membership stable when rows or families are added, one label stays on one side, phase-in batches; on the committed sample: M1 split counts unchanged, frozen eval report equal to the committed one, same hash on a second run |
 | `tests/test_train.py` | training on a tiny fixture, MLflow runs, `latest.json` promotion (with `sha256`) and `--force`, report generation, training refuses the committed store and never writes `reports/`, `production_model.json` lookup across stores (deterministic, no paths or times) |
 | `tests/test_m1_snapshot.py` | the committed `mlflow.db` hash and `mlruns/` unchanged after the viewer command, the copy relocated and refreshed, a changed snapshot refused, `reports/` rebuilt from the snapshot equal to the committed files (parsed JSON) |

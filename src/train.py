@@ -321,6 +321,9 @@ def promote_if_better(candidate: dict, pointer: Path, force: bool = False) -> bo
 
     "Better" means a higher f1_seen than the run latest.json points to now. Prints which case
     happened and returns True if latest.json was written.
+
+    Kept for reproducing Milestone 1 only. Retraining (S11) promotes through src.gate.decide, which
+    scores champion and challenger on the same frozen eval set instead of comparing stored numbers.
     """
     new_f1 = candidate["metrics"]["f1_seen"]
     new = f"{candidate['model_type']} {candidate['version']} (f1_seen {new_f1:.4f})"

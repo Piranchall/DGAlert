@@ -89,3 +89,9 @@ def committed_mlflow_store_is_never_written() -> Iterator[None]:
     assert file_sha256(config.M1_SNAPSHOT_DB) == config.M1_SNAPSHOT_DB_SHA256, (
         "a test modified the committed mlflow.db; restore it with: git restore mlflow.db"
     )
+
+
+@pytest.fixture(autouse=True)
+def no_git_sha(monkeypatch: pytest.MonkeyPatch) -> None:
+    """/health reports GIT_SHA; clear it so a value from the shell or CI cannot leak into tests."""
+    monkeypatch.delenv("GIT_SHA", raising=False)

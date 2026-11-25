@@ -112,6 +112,41 @@ RESULTS_REPORT_PATH: Path = REPORTS_DIR / "m1_results.json"
 PER_FAMILY_REPORT_PATH: Path = REPORTS_DIR / "per_family_recall.json"
 PRODUCTION_REPORT_PATH: Path = REPORTS_DIR / "production_model.json"
 
+# ---------------------------------------------------------------------------
+# Retraining data (Milestone 2), built by src/prepare_retrain.py from the three M1 splits, which it
+# does not change.
+# ---------------------------------------------------------------------------
+# Rows are assigned by a hash of their second-level label (sld): an sld is selected when
+# sha256("<salt>:<sld>"), read as a fraction of 2**64 from its first 8 bytes, is below the fraction.
+# The result depends only on the sld string, so it stays the same when other rows or families
+# change, and all rows of one sld always land on the same side.
+FROZEN_EVAL_SALT: str = "frozen-eval"
+FROZEN_EVAL_FRACTION: float = 0.2  # of each held-out family: the frozen eval slice
+VALIDATION_SALT: str = "validation"
+VALIDATION_FRACTION: float = 0.1  # of train: the validation split for model selection
+
+# Outputs (gitignored, like the M1 splits)
+TRAIN_FIT_PATH: Path = PROCESSED_DIR / "train_fit.parquet"  # train minus validation
+VALIDATION_PATH: Path = PROCESSED_DIR / "validation.parquet"
+PHASE_IN_POOL_PATH: Path = PROCESSED_DIR / "phase_in_pool.parquet"  # held-out rows to phase in
+EVAL_FROZEN_PATH: Path = PROCESSED_DIR / "eval_frozen.parquet"  # test_seen + frozen eval slices
+RETRAIN_SPLIT_REPORT_PATH: Path = PROCESSED_DIR / "retrain_split_report.json"
+# Committed: the frozen eval set's content hash and row counts per family.
+EVAL_FROZEN_REPORT_PATH: Path = REPORTS_DIR / "eval_frozen.json"
+
+# Held-out families are added to training one batch per retraining round, in this order. Batch
+# order follows the M1 gb recall on test_future (reports/per_family_recall.json), worst first:
+#   1. matsnu 0.049 (word-based labels)
+#   2. nymaim 0.211, simda 0.432
+#   3. dyre 0.646 (hex-character labels, unlike any training family), shiotob 0.740
+# The other held-out families are never phased in (PHASE_IN_CONTROL_FAMILIES): their recall is
+# 0.98 to 1.00, so a batch of them could not improve recall by the gate's margin, and keeping them
+# unseen still measures generalization to families never trained on.
+PHASE_IN_BATCHES: list[list[str]] = [["matsnu"], ["nymaim", "simda"], ["dyre", "shiotob"]]
+PHASE_IN_CONTROL_FAMILIES: list[str] = [
+    family for family in HELD_OUT_FAMILIES if not any(family in batch for batch in PHASE_IN_BATCHES)
+]
+
 
 def sqlite_uri(db_path: Path) -> str:
     """sqlite:/// tracking URI for a database file."""

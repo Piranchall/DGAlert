@@ -3,6 +3,7 @@
 # Windows has no `make`. Equivalent commands in PowerShell:
 #   setup:  py -3.13 -m venv venv ; venv\Scripts\python -m pip install -r requirements.txt
 #   data:   venv\Scripts\python -m src.prepare_data
+#   retrain-data: venv\Scripts\python -m src.prepare_retrain
 #   train:  venv\Scripts\python -m src.train
 #   report: venv\Scripts\python -m src.report
 #   mlflow-m1: venv\Scripts\python -m src.m1_snapshot
@@ -14,7 +15,7 @@
 
 PY := venv/bin/python
 
-.PHONY: setup data train report mlflow-m1 test lint serve docker-build docker-run
+.PHONY: setup data retrain-data train report mlflow-m1 test lint serve docker-build docker-run
 
 setup:
 	test -d venv || python3.13 -m venv venv
@@ -22,6 +23,10 @@ setup:
 
 data:
 	$(PY) -m src.prepare_data
+
+# Frozen eval set, phase-in pool and validation split (needs `make data` first)
+retrain-data:
+	$(PY) -m src.prepare_retrain
 
 train:
 	$(PY) -m src.train

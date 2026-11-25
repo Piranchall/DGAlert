@@ -16,9 +16,10 @@ Fall 2026). Milestone 2 adds automated retraining (KaizenML) as new malware fami
 5. [Explainability and the drift story](#explainability-and-the-drift-story)
 6. [API](#api)
 7. [Docker](#docker)
-8. [Limitations](#limitations)
-9. [Tests](#tests)
-10. [Citations](#citations)
+8. [Deployment](#deployment)
+9. [Limitations](#limitations)
+10. [Tests](#tests)
+11. [Citations](#citations)
 
 ## Architecture
 
@@ -549,6 +550,49 @@ http://127.0.0.1:8000 (docs at `/docs`), and `docker ps` shows the container as 
 - **`GIT_SHA`**: the build arg is stored in the image and returned by `/health`, which identifies
   the deployed commit. Without it the value is `unknown`.
 
+## Deployment
+
+The API runs on Render (free instance) at **https://dgalert.onrender.com** (docs at
+https://dgalert.onrender.com/docs). The Render web service runs the prebuilt image
+`ghcr.io/piranchall/dgalert` from GHCR (no build on Render) with health-check path `/health`.
+
+Every merge to `main` deploys itself, with no manual step:
+
+1. CI's `lint` and `test` pass, and `build` builds the image, smoke-tests it and pushes it to GHCR
+   as `sha-<short sha>` and `main` (see [CI](#ci)).
+2. The `deploy` job calls the service's deploy hook (GitHub secret `RENDER_DEPLOY_HOOK`) with
+   `imgURL=ghcr.io/piranchall/dgalert:sha-<short sha>`, so Render runs exactly the image that was
+   tested, not whatever `:main` points to at that moment.
+3. `deploy` then polls https://dgalert.onrender.com/health every 10 seconds until `git_sha` is the
+   merged commit, and fails after about 10 minutes if it never is.
+
+Version tags (`v*`) publish an image but do not deploy. **Cold starts:** a free instance stops
+after about 15 minutes without traffic, and the next request waits (up to about a minute) while
+it starts again. `/stats` counts from that start, so it resets after every spin-down and every
+deploy.
+
+Calling the live service (bash, macOS/Linux, Git Bash):
+
+```bash
+curl https://dgalert.onrender.com/health
+curl -X POST https://dgalert.onrender.com/predict -H "Content-Type: application/json" -d '{"domain": "moiqidfvjjhjmndqp.in"}'
+curl -X POST https://dgalert.onrender.com/explain -H "Content-Type: application/json" -d '{"domain": "wedding-muscle.com"}'
+curl https://dgalert.onrender.com/stats
+```
+
+In PowerShell, write `curl.exe` (plain `curl` is an alias for `Invoke-WebRequest`), and in Windows
+PowerShell 5.1 escape the quotes inside the JSON body:
+
+```powershell
+curl.exe https://dgalert.onrender.com/health
+curl.exe -X POST https://dgalert.onrender.com/predict -H "Content-Type: application/json" -d '{\"domain\": \"moiqidfvjjhjmndqp.in\"}'
+curl.exe -X POST https://dgalert.onrender.com/explain -H "Content-Type: application/json" -d '{\"domain\": \"wedding-muscle.com\"}'
+curl.exe https://dgalert.onrender.com/stats
+```
+
+(PowerShell 7.3 and later pass quotes through unchanged: there, use the bash form of the body,
+`-d '{"domain": "moiqidfvjjhjmndqp.in"}'`.)
+
 ## Limitations
 
 - **Purely lexical features.** The model sees only the characters of the second-level label: no
@@ -599,13 +643,15 @@ venv\Scripts\ruff format --check src tests scripts
 ### CI
 
 GitHub Actions (`.github/workflows/ci.yml`, Ubuntu, Python 3.13) runs on every pull request, on
-pushes to `main` and on `v*` tags, as three jobs that are also the required status checks:
+pushes to `main` and on `v*` tags. `lint`, `test` and `build` are the required status checks;
+`deploy` runs only on pushes to `main`:
 
 | Job | What it does |
 |---|---|
 | `lint` | `ruff check` and `ruff format --check` (installs only the ruff version pinned in `requirements.txt`) |
 | `test` | `pytest -q` with `requirements.txt`, including the sanity tests on the production model |
 | `build` | after `lint` and `test` pass: builds the Docker image with `GIT_SHA`, waits until Docker reports it healthy, checks that `/health` shows that commit and that `/predict` labels `moiqidfvjjhjmndqp.in` as `dga`, then stops it |
+| `deploy` | pushes to `main` only, after `build`: deploys the image's `sha-` tag to Render and waits until the live `/health` reports the commit (see [Deployment](#deployment)) |
 
 On pushes to `main` and `v*` tags only, `build` then pushes **the image it just tested** to the
 GitHub Container Registry as `ghcr.io/piranchall/dgalert:sha-<short sha>`, plus `:main` or the
@@ -627,7 +673,7 @@ docker run --rm -p 8000:8000 ghcr.io/piranchall/dgalert:main
 | `tests/test_app.py` | `/health` and `/predict`: success, 503 without a model or with a tampered model, every 422 validation rule |
 | `tests/test_monitoring.py` | `/stats` counts per endpoint and status class, latency, label counts matching `/predict`, `unmatched` paths, reset on restart, working without a model; thread-safe counters; one JSON log line per request with no request body |
 | `tests/test_hardening.py` | scope warnings for private suffixes and punycode (C1, C2) and their `/stats` count, `/health` `degraded` when the explainer fails (C3), the 1,024-character input limit checked before normalization (C4), `output_units` per model type (C5), `GET /` redirect (C6) |
-| `tests/test_ci.py` | the CI workflow: jobs `lint`, `test`, `build` (build after the other two), triggers, pinned ruff, `packages: write` only for `build`, publishing only on pushes to `main` and `v*` tags, lowercase image name, smoke test with a timeout |
+| `tests/test_ci.py` | the CI workflow: jobs `lint`, `test`, `build` (build after the other two), triggers, pinned ruff, `packages: write` only for `build`, publishing only on pushes to `main` and `v*` tags, lowercase image name, smoke test with a timeout, `deploy` only on pushes to `main` with the hook from the secret (never echoed) and the `sha-` tag, live URL in the workflow and the README |
 | `tests/test_docker.py` | `GIT_SHA` in `/health` (set, unset, and in the 503 body); static checks of the `Dockerfile` (pinned base image in both stages, only `requirements-api.txt`, non-root user, health check, port, command) and `.dockerignore` |
 | `tests/test_explain.py` | `/explain` shape and agreement with `/predict`; SHAP additivity for gb, rf and the logreg fallback |
 | `tests/test_hyphen_evasion.py` | hyphen insertion in `scripts/hyphen_evasion.py` keeps the suffix and splits the label in the middle |

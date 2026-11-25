@@ -36,9 +36,13 @@ def test_explain_response_shape(client: TestClient) -> None:
         "label",
         "probability",
         "model_version",
+        "in_scope",
+        "warning",
+        "output_units",
         "base_value",
         "top_contributing_features",
     }
+    assert body["output_units"] == "log_odds"  # the fixture model is gb
     items = body["top_contributing_features"]
     assert len(items) == EXPLAIN_TOP_K
     for item in items:

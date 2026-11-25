@@ -23,6 +23,8 @@ from src.features import FEATURE_NAMES, feature_frame
 
 DGA_CLASS = 1  # train.py encodes dga as 1, benign as 0
 TREE_MODEL_TYPES = ("gb", "rf")
+# Units of base_value and the contributions, per model type (see the module docstring).
+OUTPUT_UNITS: dict[str, str] = {"gb": "log_odds", "logreg": "log_odds", "rf": "probability"}
 
 
 @dataclass
@@ -53,6 +55,7 @@ class DomainExplainer:
     def __init__(self, model: Any, model_type: str) -> None:
         self.model = model
         self.model_type = model_type
+        self.output_units = OUTPUT_UNITS.get(model_type)
         self.dga_column = dga_index(model)
         if model_type in TREE_MODEL_TYPES:
             self.tree_explainer = shap.TreeExplainer(model)

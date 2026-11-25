@@ -1,4 +1,5 @@
-"""FastAPI service exposing /predict, /explain, /health and /stats. Interactive docs at /docs.
+"""FastAPI service exposing /predict, /explain, /health and /stats. Interactive docs at /docs
+(GET / redirects there).
 
 Run with: uvicorn src.app:app
 """
@@ -11,7 +12,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.routing import Match
 
@@ -25,11 +26,15 @@ from src.monitoring import (
     access_log_line,
     configure_access_logger,
 )
+from src.scope import check_scope
 
 logger = logging.getLogger(__name__)
 access_logger = configure_access_logger()
 
 MAX_DOMAIN_LENGTH = 253
+# Limit on the raw input, checked by Pydantic before normalize_domain runs (C4). A domain is at
+# most 253 characters; the rest leaves room for a pasted URL (scheme, credentials, port, path).
+MAX_RAW_INPUT_LENGTH = 1024
 MAX_LABEL_LENGTH = 63
 LABEL_CHARS = re.compile(r"^[a-z0-9-]+$")
 
@@ -76,7 +81,13 @@ def validate_domain(raw: str) -> str:
 
 
 class PredictRequest(BaseModel):
-    domain: str = Field(description="Domain name or URL; it is normalized before prediction.")
+    domain: str = Field(
+        max_length=MAX_RAW_INPUT_LENGTH,
+        description=(
+            "Domain name or URL; it is normalized before prediction. "
+            f"At most {MAX_RAW_INPUT_LENGTH} characters."
+        ),
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -84,6 +95,7 @@ class PredictRequest(BaseModel):
                 {"domain": "moiqidfvjjhjmndqp.in"},
                 {"domain": "teco.com.tw"},
                 {"domain": "HTTP://Example.COM/path"},
+                {"domain": "abcxyzqwrtplk.blogspot.com"},
             ]
         }
     )
@@ -94,11 +106,32 @@ class PredictRequest(BaseModel):
         return validate_domain(value)
 
 
+OUT_OF_SCOPE_EXAMPLE: dict[str, Any] = {  # real response of model 20261105_062411
+    "domain": "abcxyzqwrtplk.blogspot.com",
+    "label": "benign",
+    "probability": 0.0451,
+    "model_version": "20261105_062411",
+    "in_scope": False,
+    "warning": (
+        "'abcxyzqwrtplk.blogspot.com' is under the private suffix 'blogspot.com' (a hosting or "
+        "dynamic-DNS provider); the model only sees the label 'blogspot', so the prediction says "
+        "nothing about 'abcxyzqwrtplk'."
+    ),
+}
+
+
 class PredictResponse(BaseModel):
     domain: str = Field(description="The normalized domain that was classified.")
     label: Literal["benign", "dga"]
     probability: float = Field(ge=0, le=1, description="P(dga), rounded to 4 decimals.")
     model_version: str
+    in_scope: bool = Field(
+        description=(
+            "false when the domain is under a private suffix (e.g. x.blogspot.com) or contains "
+            "a punycode (xn--) label: the prediction is returned but is not meaningful."
+        )
+    )
+    warning: str | None = Field(description="Why the domain is out of scope; null when in scope.")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -108,7 +141,10 @@ class PredictResponse(BaseModel):
                     "label": "dga",
                     "probability": 0.996,
                     "model_version": "20261105_062411",
-                }
+                    "in_scope": True,
+                    "warning": None,
+                },
+                OUT_OF_SCOPE_EXAMPLE,
             ]
         }
     )
@@ -125,6 +161,12 @@ class ExplainResponse(PredictResponse):
         description="Model output before any feature is considered (the explainer's baseline)."
     )
     top_contributing_features: list[FeatureContribution]
+    output_units: Literal["log_odds", "probability"] = Field(
+        description=(
+            "Units of base_value and the contributions: log_odds for gb and logreg, "
+            "probability (P(dga)) for rf."
+        )
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -134,6 +176,9 @@ class ExplainResponse(PredictResponse):
                     "label": "dga",
                     "probability": 0.996,
                     "model_version": "20261105_062411",
+                    "in_scope": True,
+                    "warning": None,
+                    "output_units": "log_odds",
                     "base_value": -0.0369,
                     "top_contributing_features": [
                         {"feature": "length", "value": 17.0, "contribution": 1.4049},
@@ -157,9 +202,35 @@ class ExplainResponse(PredictResponse):
 
 
 class HealthResponse(BaseModel):
-    status: Literal["healthy", "unhealthy"]
+    status: Literal["healthy", "degraded", "unhealthy"] = Field(
+        description=(
+            "healthy: model and explainer loaded. degraded (still HTTP 200): the model serves "
+            "/predict but the explainer failed, so /explain returns 503. unhealthy (HTTP 503): "
+            "no model."
+        )
+    )
     model_loaded: bool
+    explainer_loaded: bool
     model_version: str | None = None
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "status": "healthy",
+                    "model_loaded": True,
+                    "explainer_loaded": True,
+                    "model_version": "20261105_062411",
+                },
+                {
+                    "status": "degraded",
+                    "model_loaded": True,
+                    "explainer_loaded": False,
+                    "model_version": "20261105_062411",
+                },
+            ]
+        }
+    )
 
 
 class EndpointStats(BaseModel):
@@ -183,6 +254,7 @@ class PredictionStats(BaseModel):
     mean_probability_dga: float | None = Field(
         description="Mean P(dga) over those predictions; null before the first one."
     )
+    out_of_scope: int = Field(description="Of those predictions, how many had in_scope false.")
 
 
 class StatsResponse(BaseModel):
@@ -220,6 +292,7 @@ class StatsResponse(BaseModel):
                         "count": 3,
                         "by_label": {"benign": 2, "dga": 1},
                         "mean_probability_dga": 0.3349,
+                        "out_of_scope": 1,
                     },
                 }
             ]
@@ -296,7 +369,9 @@ async def record_stats(
         if stats is not None:
             stats.record_request(endpoint_key(request), status_code, latency_ms)
             if prediction is not None:
-                stats.record_prediction(prediction["label"], prediction["probability"])
+                stats.record_prediction(
+                    prediction["label"], prediction["probability"], prediction["in_scope"]
+                )
         access_logger.info(
             access_log_line(request.method, request.url.path, status_code, latency_ms, prediction)
         )
@@ -328,13 +403,16 @@ def predict_proba(model: Any, domain: str) -> float:
 
 
 def classify(model: Any, domain: str, request: Request) -> PredictResponse:
-    """Shared by /predict and /explain: P(dga), thresholded label and model version."""
+    """Shared by /predict and /explain: P(dga), label, model version and the scope check."""
     proba = predict_proba(model, domain)
+    in_scope, warning = check_scope(domain)
     return PredictResponse(
         domain=domain,
         label="dga" if proba >= config.DGA_THRESHOLD else "benign",
         probability=round(proba, 4),
         model_version=str(request.app.state.metadata["version"]),
+        in_scope=in_scope,
+        warning=warning,
     )
 
 
@@ -347,7 +425,11 @@ def predict(body: PredictRequest, request: Request) -> PredictResponse:
     """Classify one domain as benign or dga."""
     response = classify(get_model(request), body.domain, request)
     # Read by the stats middleware: counted in /stats and logged (never the domain itself).
-    request.state.prediction = {"label": response.label, "probability": response.probability}
+    request.state.prediction = {
+        "label": response.label,
+        "probability": response.probability,
+        "in_scope": response.in_scope,
+    }
     return response
 
 
@@ -366,6 +448,7 @@ def explain(body: PredictRequest, request: Request) -> ExplainResponse:
     explanation = explainer.explain(body.domain, top_k=EXPLAIN_TOP_K)
     return ExplainResponse(
         **prediction.model_dump(),
+        output_units=explainer.output_units,
         base_value=explanation.base_value,
         top_contributing_features=explanation.top_contributing_features,
     )
@@ -378,14 +461,33 @@ def explain(body: PredictRequest, request: Request) -> ExplainResponse:
     responses={503: {"model": HealthResponse, "description": "No model is loaded"}},
 )
 def health(request: Request) -> HealthResponse | JSONResponse:
-    """200 when a model is loaded, 503 otherwise (used by the container healthcheck)."""
+    """Model and explainer status (used by the container and Render health checks).
+
+    200 "healthy" with both loaded; 200 "degraded" when the explainer failed (only /explain is
+    down, so the service should not be restarted for it); 503 "unhealthy" without a model.
+    """
+    explainer_loaded = request.app.state.explainer is not None
     if request.app.state.model is None:
-        return JSONResponse(status_code=503, content={"status": "unhealthy", "model_loaded": False})
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "unhealthy",
+                "model_loaded": False,
+                "explainer_loaded": explainer_loaded,
+            },
+        )
     return HealthResponse(
-        status="healthy",
+        status="healthy" if explainer_loaded else "degraded",
         model_loaded=True,
+        explainer_loaded=explainer_loaded,
         model_version=str(request.app.state.metadata["version"]),
     )
+
+
+@app.get("/", include_in_schema=False)
+def root() -> RedirectResponse:
+    """The bare URL has nothing to show: send visitors to the interactive docs (C6)."""
+    return RedirectResponse(url="/docs")
 
 
 @app.get("/stats", response_model=StatsResponse)

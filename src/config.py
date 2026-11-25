@@ -147,6 +147,30 @@ PHASE_IN_CONTROL_FAMILIES: list[str] = [
     family for family in HELD_OUT_FAMILIES if not any(family in batch for batch in PHASE_IN_BATCHES)
 ]
 
+# ---------------------------------------------------------------------------
+# Promotion gate (src/gate.py): a retrained challenger replaces the champion only if all hold,
+# with both models scored on the same frozen eval set rows. Boundaries are inclusive.
+# ---------------------------------------------------------------------------
+GATE_MIN_NEW_FAMILY_RECALL_GAIN: float = 0.02  # pooled recall on the newly added families
+GATE_MAX_SEEN_F1_DROP: float = 0.01  # F1 on the test_seen rows (training families + benign)
+GATE_MAX_FPR_RISE: float = 0.005  # false-positive rate on the benign rows
+# Pooled recall on the families phased in during earlier rounds (a sixth criterion, beyond the
+# slice's five). Those families are held-out families, so their rows are not in the seen-F1 rows at
+# all: without this criterion a collapse on a ~600-row earlier family would go unnoticed (it would
+# move F1 over all ~46.8k frozen rows only slightly, and that F1 is not gated).
+GATE_MAX_PRIOR_RECALL_DROP: float = 0.02
+
+# Domains every served model must classify correctly (the gate's sanity criterion and the sanity
+# tests on the production model).
+SANITY_DOMAINS: list[tuple[str, str]] = [
+    ("google.com", "benign"),
+    ("wikipedia.org", "benign"),
+    ("github.com", "benign"),
+    ("teco.com.tw", "benign"),
+    ("moiqidfvjjhjmndqp.in", "dga"),
+    ("qxxsoxcwrcplo.net", "dga"),
+]
+
 
 def sqlite_uri(db_path: Path) -> str:
     """sqlite:/// tracking URI for a database file."""

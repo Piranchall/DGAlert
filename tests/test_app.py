@@ -183,17 +183,7 @@ def test_openapi_has_examples(client: TestClient) -> None:
 
 
 @pytest.mark.sanity
-@pytest.mark.parametrize(
-    ("domain", "expected"),
-    [
-        ("google.com", "benign"),
-        ("wikipedia.org", "benign"),
-        ("github.com", "benign"),
-        ("teco.com.tw", "benign"),
-        ("moiqidfvjjhjmndqp.in", "dga"),
-        ("qxxsoxcwrcplo.net", "dga"),
-    ],
-)
+@pytest.mark.parametrize(("domain", "expected"), config.SANITY_DOMAINS)
 def test_real_model_sanity(monkeypatch: pytest.MonkeyPatch, domain: str, expected: str) -> None:
     monkeypatch.setenv(POINTER_ENV_VAR, str(config.PRODUCTION_MODEL_POINTER))
     with TestClient(app) as real_client:

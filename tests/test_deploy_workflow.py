@@ -14,6 +14,7 @@ WORKFLOW = yaml.safe_load((WORKFLOW_DIR / WORKFLOW_FILE).read_text(encoding="utf
 JOB = WORKFLOW["jobs"]["deploy"]
 LIVE_URL = "https://dgalert.onrender.com"
 RUNBOOK = (config.ROOT_DIR / "RUNBOOK.md").read_text(encoding="utf-8")
+SHORT_TAG = re.compile(r"sha-[0-9a-f]{7}\b")
 
 
 def triggers() -> dict:
@@ -23,6 +24,13 @@ def triggers() -> dict:
 
 def step(name: str) -> dict:
     return next(s for s in JOB["steps"] if s.get("name") == name)
+
+
+def runbook_section(heading: str) -> str:
+    """Text of one "## " section of RUNBOOK.md, up to the next "## " heading."""
+    start = RUNBOOK.index(f"## {heading}\n")
+    end = RUNBOOK.find("\n## ", start + 1)
+    return RUNBOOK[start : end if end != -1 else None]
 
 
 def tag_pattern() -> re.Pattern:
@@ -146,9 +154,13 @@ def test_runbook_commands_match_the_workflow() -> None:
     for file, input_name, value in commands:
         assert file == WORKFLOW_FILE
         assert input_name in inputs
-        assert value.startswith("sha-") or value == "$tag", value
-    # $tag is always built as "sha-" + the short commit.
+        assert value.startswith("sha-") or value in {"$tag", "$noted"}, value
+    # $tag and $noted are always built as "sha-" + a short commit.
     assert '$tag = "sha-" + (git rev-parse --short=7 HEAD)' in RUNBOOK
+    assert (
+        '$noted = "sha-" + (curl.exe -s ' + LIVE_URL + "/health | ConvertFrom-Json).git_sha"
+        in RUNBOOK
+    )
 
 
 def test_runbook_covers_the_required_topics() -> None:
@@ -166,3 +178,40 @@ def test_runbook_covers_the_required_topics() -> None:
     assert LIVE_URL in RUNBOOK
     # Reverting S1's PR would delete the only production model: the RUNBOOK must say not to.
     assert "Do not revert #30" in RUNBOOK
+
+
+@pytest.mark.parametrize("heading", ["Roll back the service", "Roll forward"])
+def test_runbook_procedures_use_placeholders_not_example_tags(heading: str) -> None:
+    # Hard-coded tags read like instructions (found in the rehearsal).
+    section = runbook_section(heading)
+    assert not SHORT_TAG.findall(section), SHORT_TAG.findall(section)
+
+
+def test_runbook_explains_tag_from_git_sha_and_prints_noted() -> None:
+    rollback = runbook_section("Roll back the service")
+    assert "plus the `git_sha` in `/health`" in rollback
+    noted_line = rollback.index("$noted = ")
+    # The next line prints $noted so the reader checks it before deploying it.
+    assert rollback[noted_line:].splitlines()[1].strip().startswith("$noted   #")
+    assert "$noted" in runbook_section("Roll forward")
+
+
+def test_runbook_waits_before_picking_the_newest_run() -> None:
+    watching = runbook_section("Watching a deploy run")
+    assert watching.index("Start-Sleep 10") < watching.index("--limit 1")
+    assert "--event workflow_dispatch" in watching
+
+
+def test_runbook_fix_main_is_skipped_in_a_rehearsal() -> None:
+    assert "skip this in a rehearsal" in runbook_section("Roll back the service")
+
+
+def test_runbook_records_the_rehearsal() -> None:
+    record = runbook_section("Rehearsal record")
+    rows = [line for line in record.splitlines() if re.match(r"\| \d+ \|", line)]
+    assert len(rows) >= 4
+    for who in ("Hussain", "Piranchal (following the RUNBOOK"):
+        for action in ("rollback", "roll forward"):
+            assert any(who in row and f"| {action} |" in row for row in rows), (who, action)
+    assert "unaided" not in record
+    assert "Not tested" in record

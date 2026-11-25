@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
+from sklearn.ensemble import HistGradientBoostingClassifier
 
 from src.app import EXPLAIN_TOP_K, app
 from src.explain import DomainExplainer, build_explainer
@@ -133,6 +134,21 @@ def test_rf_explainer(sample_xy: tuple[pd.DataFrame, pd.Series], domain: str) ->
     # RF SHAP values are in probability units: base + all contributions = P(dga)
     base, total = all_contributions(explainer, domain)
     assert base + total == pytest.approx(model.predict_proba(feature_frame(domain))[0, 1], abs=1e-6)
+
+
+@pytest.mark.parametrize("domain", DOMAINS)
+def test_hgb_contributions_sum_to_log_odds(
+    sample_xy: tuple[pd.DataFrame, pd.Series], domain: str
+) -> None:
+    # The retraining loop's model type (src.retrain): one output, the log-odds of dga, like gb.
+    x, y = sample_xy
+    model = HistGradientBoostingClassifier(max_iter=20, random_state=0).fit(x, y)
+    explainer = build_explainer(model, "hgb")
+    assert explainer.output_units == "log_odds"
+    base, total = all_contributions(explainer, domain)
+    assert base + total == pytest.approx(
+        model.decision_function(feature_frame(domain))[0], abs=1e-6
+    )
 
 
 @pytest.mark.parametrize("domain", DOMAINS)

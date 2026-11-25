@@ -15,6 +15,7 @@ sld raises).
 Run with: python -m src.prepare_retrain (after python -m src.prepare_data)
 """
 
+import argparse
 import hashlib
 import json
 from itertools import combinations
@@ -191,10 +192,22 @@ def prepare_retrain(processed_dir: Path, out_dir: Path, eval_report_path: Path) 
     return eval_report
 
 
-def main() -> None:
-    report = prepare_retrain(
-        config.PROCESSED_DIR, config.PROCESSED_DIR, config.EVAL_FROZEN_REPORT_PATH
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--eval-report",
+        type=Path,
+        default=config.EVAL_FROZEN_REPORT_PATH,
+        help="where to write the frozen eval report (default: the committed "
+        "reports/eval_frozen.json). The retrain workflow writes it elsewhere, so the committed "
+        "hash stays the reference the gate checks against.",
     )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = parse_args(argv)
+    report = prepare_retrain(config.PROCESSED_DIR, config.PROCESSED_DIR, args.eval_report)
     split = json.loads(config.RETRAIN_SPLIT_REPORT_PATH.read_text(encoding="utf-8"))
     for name, rows in split["rows"].items():
         print(f"{name}: {rows} rows")

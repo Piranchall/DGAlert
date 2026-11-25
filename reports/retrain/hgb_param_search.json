@@ -1,0 +1,201 @@
+{
+  "train_rows": 138248,
+  "validation_rows": 15379,
+  "metric": "F1 on validation, dga = P(dga) >= DGA_THRESHOLD",
+  "fixed": {
+    "early_stopping": false,
+    "random_state": 42
+  },
+  "grid": {
+    "learning_rate": [
+      0.05,
+      0.1
+    ],
+    "max_iter": [
+      200,
+      400
+    ],
+    "max_leaf_nodes": [
+      31,
+      63
+    ],
+    "min_samples_leaf": [
+      20,
+      50
+    ]
+  },
+  "tie_margin": 0.001,
+  "best_validation_f1": 0.8902,
+  "chosen": {
+    "learning_rate": 0.1,
+    "max_iter": 200,
+    "max_leaf_nodes": 63,
+    "min_samples_leaf": 20,
+    "early_stopping": false,
+    "random_state": 42
+  },
+  "chosen_validation_f1": 0.8894,
+  "points_within_tie_margin": 3,
+  "results": [
+    {
+      "params": {
+        "learning_rate": 0.05,
+        "max_iter": 400,
+        "max_leaf_nodes": 63,
+        "min_samples_leaf": 20
+      },
+      "validation_f1": 0.8902,
+      "fit_s": 21.5
+    },
+    {
+      "params": {
+        "learning_rate": 0.05,
+        "max_iter": 400,
+        "max_leaf_nodes": 63,
+        "min_samples_leaf": 50
+      },
+      "validation_f1": 0.8901,
+      "fit_s": 21.6
+    },
+    {
+      "params": {
+        "learning_rate": 0.1,
+        "max_iter": 200,
+        "max_leaf_nodes": 63,
+        "min_samples_leaf": 20
+      },
+      "validation_f1": 0.8894,
+      "fit_s": 10.7
+    },
+    {
+      "params": {
+        "learning_rate": 0.1,
+        "max_iter": 200,
+        "max_leaf_nodes": 63,
+        "min_samples_leaf": 50
+      },
+      "validation_f1": 0.8891,
+      "fit_s": 10.5
+    },
+    {
+      "params": {
+        "learning_rate": 0.1,
+        "max_iter": 400,
+        "max_leaf_nodes": 63,
+        "min_samples_leaf": 20
+      },
+      "validation_f1": 0.8891,
+      "fit_s": 20.0
+    },
+    {
+      "params": {
+        "learning_rate": 0.1,
+        "max_iter": 400,
+        "max_leaf_nodes": 31,
+        "min_samples_leaf": 20
+      },
+      "validation_f1": 0.8885,
+      "fit_s": 12.3
+    },
+    {
+      "params": {
+        "learning_rate": 0.05,
+        "max_iter": 200,
+        "max_leaf_nodes": 63,
+        "min_samples_leaf": 50
+      },
+      "validation_f1": 0.8884,
+      "fit_s": 11.4
+    },
+    {
+      "params": {
+        "learning_rate": 0.05,
+        "max_iter": 400,
+        "max_leaf_nodes": 31,
+        "min_samples_leaf": 50
+      },
+      "validation_f1": 0.8883,
+      "fit_s": 12.7
+    },
+    {
+      "params": {
+        "learning_rate": 0.1,
+        "max_iter": 200,
+        "max_leaf_nodes": 31,
+        "min_samples_leaf": 20
+      },
+      "validation_f1": 0.8882,
+      "fit_s": 6.6
+    },
+    {
+      "params": {
+        "learning_rate": 0.1,
+        "max_iter": 400,
+        "max_leaf_nodes": 31,
+        "min_samples_leaf": 50
+      },
+      "validation_f1": 0.8882,
+      "fit_s": 11.8
+    },
+    {
+      "params": {
+        "learning_rate": 0.1,
+        "max_iter": 400,
+        "max_leaf_nodes": 63,
+        "min_samples_leaf": 50
+      },
+      "validation_f1": 0.888,
+      "fit_s": 19.6
+    },
+    {
+      "params": {
+        "learning_rate": 0.05,
+        "max_iter": 200,
+        "max_leaf_nodes": 63,
+        "min_samples_leaf": 20
+      },
+      "validation_f1": 0.8879,
+      "fit_s": 11.9
+    },
+    {
+      "params": {
+        "learning_rate": 0.05,
+        "max_iter": 400,
+        "max_leaf_nodes": 31,
+        "min_samples_leaf": 20
+      },
+      "validation_f1": 0.8873,
+      "fit_s": 12.9
+    },
+    {
+      "params": {
+        "learning_rate": 0.05,
+        "max_iter": 200,
+        "max_leaf_nodes": 31,
+        "min_samples_leaf": 50
+      },
+      "validation_f1": 0.8872,
+      "fit_s": 7.0
+    },
+    {
+      "params": {
+        "learning_rate": 0.1,
+        "max_iter": 200,
+        "max_leaf_nodes": 31,
+        "min_samples_leaf": 50
+      },
+      "validation_f1": 0.887,
+      "fit_s": 6.3
+    },
+    {
+      "params": {
+        "learning_rate": 0.05,
+        "max_iter": 200,
+        "max_leaf_nodes": 31,
+        "min_samples_leaf": 20
+      },
+      "validation_f1": 0.8864,
+      "fit_s": 7.8
+    }
+  ]
+}

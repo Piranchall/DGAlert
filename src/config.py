@@ -160,6 +160,26 @@ GATE_MAX_FPR_RISE: float = 0.005  # false-positive rate on the benign rows
 # move F1 over all ~46.8k frozen rows only slightly, and that F1 is not gated).
 GATE_MAX_PRIOR_RECALL_DROP: float = 0.02
 
+# ---------------------------------------------------------------------------
+# Retraining loop (src/retrain.py)
+# ---------------------------------------------------------------------------
+MLFLOW_KAIZEN_EXPERIMENT_NAME: str = "dgalert-m2-kaizen"
+RETRAIN_REPORTS_DIR: Path = REPORTS_DIR / "retrain"  # round_<n>.json (committed with a promotion)
+RETRAIN_MODEL_TYPE: str = "hgb"
+# Fixed HistGradientBoostingClassifier parameters, chosen once by scripts/select_hgb_params.py on
+# the validation split (fit on train_fit, F1 on validation; results in
+# reports/retrain/hgb_param_search.json). Best F1 0.8902 (lr 0.05, 400 iterations, 63 leaves);
+# three points were within 0.001 of it and the cheapest of those was chosen: F1 0.8894 with half
+# the iterations. Fixed parameters keep a round deterministic and as fast as one fit (about 10 s).
+HGB_PARAMS: dict = {
+    "learning_rate": 0.1,
+    "max_iter": 200,
+    "max_leaf_nodes": 63,
+    "min_samples_leaf": 20,
+    "early_stopping": False,
+    "random_state": SEED,
+}
+
 # Domains every served model must classify correctly (the gate's sanity criterion and the sanity
 # tests on the production model).
 SANITY_DOMAINS: list[tuple[str, str]] = [

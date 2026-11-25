@@ -168,7 +168,7 @@ class ExplainResponse(PredictResponse):
     top_contributing_features: list[FeatureContribution]
     output_units: Literal["log_odds", "probability"] = Field(
         description=(
-            "Units of base_value and the contributions: log_odds for gb and logreg, "
+            "Units of base_value and the contributions: log_odds for gb, hgb and logreg, "
             "probability (P(dga)) for rf."
         )
     )

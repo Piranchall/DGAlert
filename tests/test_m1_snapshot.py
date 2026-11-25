@@ -126,7 +126,27 @@ def test_m1_reports_rebuilt_from_snapshot_match_committed(
     assert {m: results["models"][m]["mlflow_run_id"] for m in M1_RUN_IDS} == M1_RUN_IDS
 
 
+def production_pointer() -> dict:
+    return json.loads(config.PRODUCTION_MODEL_POINTER.read_text(encoding="utf-8"))
+
+
+def test_production_report_describes_the_production_model() -> None:
+    """Always true, also after a retraining round promoted a model (S11)."""
+    pointer = production_pointer()
+    report = committed_report(config.PRODUCTION_REPORT_PATH)
+    for key in ("version", "model_type", "sha256", "mlflow_run_id"):
+        assert report[key] == pointer[key], key
+    assert report["phased_in_families"] == pointer.get("phased_in_families", [])
+
+
 def test_production_report_matches_committed(snapshot_uri: str, tmp_path: Path) -> None:
+    """Rebuilt from the M1 snapshot, while production is the M1 model.
+
+    A model promoted by the retraining loop has its MLflow run in the retrain workflow's artifact,
+    not in the repo, so its report cannot be rebuilt here (the test above still checks it).
+    """
+    if production_pointer()["mlflow_run_id"] != M1_RUN_IDS["gb"]:
+        pytest.skip("production is a retrained model: its MLflow run is in a workflow artifact")
     absent_local = config.sqlite_uri(tmp_path / "no_local_store" / "mlflow.db")
     stores = [("local", absent_local), ("m1_snapshot", snapshot_uri)]
 

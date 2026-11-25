@@ -4,22 +4,101 @@
 
 DGAlert classifies a domain such as `moiqidfvjjhjmndqp.in` as `benign` or `dga` (made by a malware
 Domain Generation Algorithm) using 15 lexical features of its second-level label, and explains each
-decision with SHAP. It is the Milestone 1 deliverable of an MLOps course project (BS CS, IBA,
-Fall 2026). Milestone 2 adds automated retraining (KaizenML) as new malware families appear.
+decision with SHAP. It is an MLOps course project (BS CS, IBA, Fall 2026). Milestone 1
+(`v1.0-milestone1`) built the model and the API. Milestone 2 runs the API in Docker, tests it in
+CI, deploys it to Render, monitors it through `/stats`, and adds a retraining loop with a promotion gate (KaizenML) for new
+malware families.
+
+Live service: **https://dgalert.onrender.com** (docs at `/docs`).
 
 ## Contents
 
-1. [Architecture](#architecture)
-2. [Quick start](#quick-start)
-3. [Data](#data)
-4. [Results](#results)
-5. [Explainability and the drift story](#explainability-and-the-drift-story)
-6. [API](#api)
-7. [Docker](#docker)
-8. [Deployment](#deployment)
-9. [Limitations](#limitations)
-10. [Tests](#tests)
-11. [Citations](#citations)
+1. [Project Focus](#project-focus)
+2. [Architecture](#architecture)
+3. [Quick start](#quick-start)
+4. [Data](#data)
+5. [Results](#results)
+6. [Explainability and the drift story](#explainability-and-the-drift-story)
+7. [API](#api)
+8. [Docker](#docker)
+9. [Deployment](#deployment)
+10. [Limitations](#limitations)
+11. [Changes since the proposal](#changes-since-the-proposal)
+12. [Tests](#tests)
+13. [Citations](#citations)
+
+## Project Focus
+
+**What.** The main focus is **KaizenML**: automated retraining against drift. New DGA families
+keep appearing, so the model is retrained in rounds, and a retrained model replaces the
+production model only after a promotion gate accepts it. The second focus is **explainability**:
+`/explain` returns the SHAP contributions behind every prediction. That is how the main drift in
+our data was found (matsnu, below).
+
+**Why it fits.** A lexical DGA classifier ages. In Milestone 1, 14 of the 46 usable UMUDGA
+families were held out as "future" malware, and the production model misses several of them:
+`matsnu` recall 0.0494, `nymaim` 0.2107, `simda` 0.4315, against 0.8853 on the families it
+trained on. No live DGA feed is freely available, so the held-out families stand in for new
+malware.
+
+**What is built and compared.**
+
+- A **frozen evaluation set** with a committed hash
+  ([Retraining data](#retraining-data-milestone-2)). Every candidate is scored on the same rows.
+- A **promotion gate** that scores the production model (champion) and the retrained model
+  (challenger) on those rows and checks six criteria: recall on the new families, F1 on the seen
+  families, false-positive rate, recall on earlier phased-in families, sanity domains, and the
+  frozen hash ([Promotion gate](#promotion-gate-milestone-2)).
+- A **retraining loop** in GitHub Actions. Each round phases in the next batch of held-out
+  families, retrains, logs to MLflow and runs the gate. A promotion opens a pull request that the
+  other member reviews; merging it deploys the new model
+  ([Retraining loop](#retraining-loop-milestone-2)).
+- A **feature-set ablation**, which separates the model family from the feature set in the M1
+  comparison ([Feature-set ablation](#feature-set-ablation-milestone-2)).
+
+**What happened so far.** Round 1 (matsnu) ran on `main` (Actions run 45668715690). **The gate
+rejected it.**
+
+| Measure (frozen eval set) | Champion (gb, M1) | Challenger (hgb + matsnu) | Gate result |
+|---|---|---|---|
+| matsnu recall | 0.0560 | 0.8727 | pass |
+| seen F1 | 0.8891 | 0.8850 | pass |
+| false-positive rate | 0.1066 | 0.1235 | **fail** (+0.0169; at most +0.005 allowed) |
+| sanity domains | 6/6 | 6/6 | pass |
+
+The cause of the extra false positives was measured by also training the same model without the
+matsnu rows:
+
+- The model change (gb to HistGradientBoosting) adds +0.0031 to the false-positive rate.
+- The matsnu rows add +0.0138: 396 benign domains are newly flagged.
+- 57.8% of those newly flagged domains contain a hyphen, against 9.4% of all benign domains.
+  Examples: `anime-planet.com`, `tiger-explorer.com`, `national-lottery.biz`.
+
+matsnu joins two English words with a hyphen (`accident-club.com`). Before matsnu, no training
+DGA label had a hyphen, so the model learns that a hyphen plus dictionary words means DGA, and
+real hyphenated two-word sites look the same. Under the proposal's original rule (strict F1
+improvement plus the sanity tests), this model would have been promoted, because F1 on the frozen
+set rose from 0.8870 to 0.8952 (see
+[Changes since the proposal](#changes-since-the-proposal)).
+
+**How it is demonstrated.**
+
+1. Actions → "Retrain" → Run workflow on `main`, with *dry_run* unticked.
+2. The run's summary shows the gate report: each criterion with champion and challenger values,
+   the decision and its reasons. The MLflow store and the report are kept as an artifact.
+3. A rejection ends there, as in round 1. A promotion opens the PR
+   "retrain: round <n> (automated)". Merging it deploys the new model, and the live `/health`
+   then shows its `model_version`.
+
+**Next steps (final presentation).**
+
+- **Hyphen-insensitive features:** compute the features on the label with hyphens removed and drop
+  `hyphen_count`. This addresses both the matsnu false positives and the hyphen evasion in
+  [Limitations](#limitations).
+- **Threshold tuning:** choose the decision threshold on the validation split for a target
+  false-positive rate.
+- **Drift signals in `/stats`:** compare the flag rate and the score distribution against a
+  reference.
 
 ## Architecture
 
@@ -43,12 +122,74 @@ flowchart LR
     M -. "MODEL_POINTER=models/latest.json" .-> API
 ```
 
+Milestone 2 adds the delivery pipeline and the retraining loop:
+
+```mermaid
+flowchart LR
+    subgraph CI["GitHub Actions: ci.yml"]
+        L["lint"] --> B["build + smoke test"]
+        TE["test"] --> B
+        B --> D["deploy.yml"]
+    end
+    MAIN["merge to main"] --> CI
+    B -- "sha-&lt;short&gt;" --> G[("GHCR<br/>ghcr.io/piranchall/dgalert")]
+    D -- "deploy hook + imgURL" --> R["Render<br/>dgalert.onrender.com"]
+    G --> R
+    subgraph RT["GitHub Actions: retrain.yml (manual; weekly dry run)"]
+        PD["prepare_data +<br/>prepare_retrain"] --> RR["src/retrain.py<br/>next batch, fit hgb"]
+        RR --> GT{"src/gate.py<br/>6 criteria on the<br/>frozen eval set"}
+    end
+    GT -- "promote" --> RPR["PR: retrain: round &lt;n&gt;<br/>(reviewed by the other member)"]
+    GT -- "reject" --> REP["gate report +<br/>MLflow artifact"]
+    RPR --> MAIN
+```
+
 All features are defined once in `src/features.py` and used by `prepare_data`, `train`, the API
 and the explainer. Features use only the second-level label (`mail.google.co.uk` -> `google`,
 via `tldextract` with its bundled public suffix list). The n-gram and dictionary features come from
 a fixed English word list in `data/reference/`, never from the training data, to avoid leakage.
 
 ## Quick start
+
+### From a clean clone to a running container and a live call
+
+Needs only git and Docker (Docker Desktop on Windows/macOS), not Python. The same commands work
+in bash and in PowerShell:
+
+```bash
+git clone https://github.com/Piranchall/DGAlert.git
+cd DGAlert
+docker build --build-arg GIT_SHA=$(git rev-parse --short HEAD) -t dgalert:local .
+docker run --rm -d -p 8000:8000 --name dgalert dgalert:local
+docker ps --filter name=dgalert      # STATUS shows "(healthy)" after about 10 seconds
+```
+
+Then call it, locally and on the live service. In bash:
+
+```bash
+curl http://127.0.0.1:8000/health
+curl -X POST http://127.0.0.1:8000/predict -H "Content-Type: application/json" -d '{"domain": "moiqidfvjjhjmndqp.in"}'
+curl https://dgalert.onrender.com/health
+curl -X POST https://dgalert.onrender.com/predict -H "Content-Type: application/json" -d '{"domain": "moiqidfvjjhjmndqp.in"}'
+```
+
+In Windows PowerShell 5.1, write `curl.exe` and escape the quotes inside the JSON body:
+
+```powershell
+curl.exe http://127.0.0.1:8000/health
+curl.exe -X POST http://127.0.0.1:8000/predict -H "Content-Type: application/json" -d '{\"domain\": \"moiqidfvjjhjmndqp.in\"}'
+curl.exe https://dgalert.onrender.com/health
+curl.exe -X POST https://dgalert.onrender.com/predict -H "Content-Type: application/json" -d '{\"domain\": \"moiqidfvjjhjmndqp.in\"}'
+```
+
+- **Local `/health`:** shows `"status": "healthy"` and, as `git_sha`, the commit you built.
+- **`/predict`:** returns `"label": "dga"` for this domain.
+- **The live service:** can take up to about a minute to answer the first call after it has been
+  idle (see [Deployment](#deployment)).
+- **Stop the container:** `docker stop dgalert`.
+- **Interactive docs:** http://127.0.0.1:8000/docs.
+
+### From source (Python)
 
 **Requires Python 3.13.**
 
@@ -74,11 +215,31 @@ venv\Scripts\python -m src.m1_snapshot             # copy of the M1 runs; prints
 venv\Scripts\python -m src.report                  # rebuilds reports/ (needs data/processed/)
 ```
 
+macOS / Linux (bash, from the repo root; `python3.13` must be on the PATH):
+
+```bash
+python3.13 -m venv venv
+venv/bin/python -m pip install -r requirements.txt
+
+venv/bin/python -m uvicorn src.app:app          # serves the committed model; no training needed
+                                                # API at http://127.0.0.1:8000, docs at /docs
+venv/bin/python -m pytest -q
+
+venv/bin/python -m src.prepare_data             # writes data/processed/
+venv/bin/python -m src.prepare_retrain          # retraining data + reports/eval_frozen.json (after prepare_data)
+venv/bin/python -m src.retrain --dry-run        # one retraining round, gate only (after prepare_retrain)
+venv/bin/python -m src.train --model all        # trains logreg, rf, gb; writes models/latest.json
+venv/bin/mlflow ui --backend-store-uri sqlite:///mlflow_local/mlflow.db   # your runs, http://127.0.0.1:5000
+
+venv/bin/python -m src.m1_snapshot              # copy of the M1 runs; prints its `mlflow ui` command
+venv/bin/python -m src.report                   # rebuilds reports/ (needs data/processed/)
+```
+
 Training takes about 11 minutes. Most of it is the gradient boosting model: about 6 minutes of grid
 search (27 grid points x 3 folds) and about 4.4 minutes refitting the best grid point on the full
 train set.
 
-Linux/macOS equivalents (see `Makefile`):
+The same steps as `make` targets on macOS / Linux (see `Makefile`):
 
 | Step | Command |
 |---|---|
@@ -157,7 +318,8 @@ everything.
 
 ### Sources
 
-- **DGA domains: UMUDGA** (Zago, Gil Pérez and Martínez Pérez, 2020), Mendeley Data,
+- **DGA domains: UMUDGA** (Zago, Gil Pérez and Martínez Pérez, *Data in Brief* 30, 2020; full
+  reference under [Citations](#citations)). Dataset on Mendeley Data,
   DOI [10.17632/y8ph45msv8.1](https://doi.org/10.17632/y8ph45msv8.1), MIT licence.
   For each family only `<family>/list/10000.txt` is used; the family name is the folder name.
 - **Benign domains: Tranco** top-1M list
@@ -344,10 +506,12 @@ venv\Scripts\python -m src.retrain --dry-run   # train and gate only; models/pro
 
 **A rejected batch is retried unchanged.** The data is fixed and training is deterministic, so
 every later round with the same features and parameters gets the same decision.
-- **Round 1 locally:** the dry run of round 1 (matsnu) was rejected on the false-positive rate.
+- **Round 1 (matsnu) was rejected on the false-positive rate,** in the real round on `main`
+  (Actions run 45668715690) and identically in a local dry run.
   - matsnu recall: 0.056 → 0.873.
   - Seen F1: −0.004.
-  - False-positive rate: 0.1066 → 0.1235, a rise of +0.0169 against the 0.005 allowed.
+  - False-positive rate: 0.1066 → 0.1235, a rise of +0.0169 against the 0.005 allowed. Why it
+    rises is in [Project Focus](#project-focus).
 - **The planned fix** for the final presentation is hyphen-insensitive features.
 
 **Note:** once a retrained model is in production, its MLflow run lives in the workflow artifact,
@@ -371,6 +535,10 @@ class = dga). Numbers come from `reports/m1_results.json`, which `src/report.py`
   second-level label, on a stratified 40000-row subsample of train). Every grid point is a nested
   MLflow child run. Best grid point: `n_estimators=200`, `max_depth=7`, `learning_rate=0.05`, with
   CV F1 0.8841 ± 0.0026. It was then refit on the full train set.
+
+**This table mixes two effects.** logreg got only the 8 basic features and the trees got all 15,
+so the 0.1256 `f1_seen` gap between logreg and gb is partly the feature set. The
+[feature-set ablation](#feature-set-ablation-milestone-2) separates the two.
 
 ### Why f1_seen and f1_future are not comparable
 
@@ -424,13 +592,23 @@ grid on the same M1 splits: logreg with the M1 parameters, gb with M1's best gri
 | gb | 8 basic | 0.7861 | 0.6771 | 0.2753 | 0.0207 |
 | gb | all 15 (M1, production) | 0.8891 | 0.7885 | 0.646 | 0.0494 |
 
-- The two M1 cells reproduce M1 exactly (every metric and every per-family recall).
-- The dictionary and n-gram features help both models: +0.0656 `f1_seen` for logreg, +0.103 for
-  gb. With the same 15 features gb still leads logreg by 0.06 `f1_seen`.
-- logreg catches every dyre label with either feature set. gb catches fewer dyre labels with the
-  8 basic features (0.2753) than with all 15 (0.646).
+- **Reproduction.** The two M1 cells reproduce M1 exactly (every metric and every per-family
+  recall). A rerun on the same machine writes a byte-identical report.
+- **The M1 gap is about half features, half model.** Of the 0.1256 `f1_seen` gap between M1's
+  logreg and gb:
+  - giving logreg the dictionary and n-gram features closes 0.0656 (0.7635 → 0.8291);
+  - with the same 15 features, gb still leads logreg by 0.06 (0.8891 against 0.8291).
+  - So "gb is better on seen families" still holds, but by less than the M1 table suggests.
+- **Unseen families: on 15 features logreg has the higher recall** (`recall_future` 0.8194 against gb's 0.7885),
+  but lower precision on `test_seen` (0.8385 against 0.8929), so it also flags more benign domains.
+- **The extra features help gb much more than logreg** (+0.103 `f1_seen` against +0.0656). gb
+  on the 8 basic features is the weakest cell on unseen families (`recall_future` 0.6771).
+- **dyre:** logreg catches every dyre label with either feature set. gb catches fewer with the 8
+  basic features (0.2753) than with all 15 (0.646). See
+  [dyre and the tree models](#dyre-and-the-tree-models).
 
-The comparison and the dyre explanation below are revised in slice S13.
+gb stays the production model: it is best on `f1_seen`, the metric declared in advance, also
+when logreg gets the same features.
 
 ### Per-family recall (gb)
 
@@ -491,24 +669,43 @@ hyphenated names are common among real benign sites. So the model learned the sh
 words with hyphens, so all three models catch only about 5% of it (`matsnu` recall: gb 0.0494,
 rf 0.0457, logreg 0.0587).
 
-This is the drift Milestone 2 has to handle. Once labelled matsnu domains reach the training set,
-retraining gives the model hyphenated DGA examples and the shortcut stops working. Per-family recall
-on `test_future` is the baseline that retraining should improve.
+This is the drift Milestone 2 has to handle. Per-family recall on `test_future` is the baseline
+that retraining should improve. Round 1 of the retraining loop added labelled matsnu domains:
+matsnu recall rose from 0.056 to 0.873, but the model then flagged hyphenated benign sites too,
+and the gate rejected it on the false-positive rate (see [Project Focus](#project-focus)).
+Retraining alone swaps one hyphen shortcut for another; hyphen-insensitive features are the
+planned fix.
 
-### dyre: a pattern trees cannot extrapolate to
+### dyre and the tree models
 
 dyre labels are one letter followed by 33 hex characters (e.g.
-`a022b679b3dcd50dda1b4c6633662a3512`): 34 characters long, which is longer than any DGA label in
-training. Both tree models miss about a third of them (`dyre` recall: gb 0.646, rf 0.641), while
-logreg catches all of them (1.0).
+`a022b679b3dcd50dda1b4c6633662a3512`), always 34 characters long. Both tree models miss about a
+third of them (`dyre` recall: gb 0.646, rf 0.641), while logreg catches all of them (1.0).
 
-A tree can only split on values it saw during training. For any value beyond the training range it
-returns the prediction of the edge region, so it cannot extrapolate. SHAP on gb's misses shows the
-biggest pushes toward benign come from `digit_ratio` and `unique_char_ratio`. A 34-character label
-drawn from only 16 hex symbols has a low unique-character ratio, which in the training data was
-far more common among long benign labels than among DGA labels. `length` itself contributes only a little. A
-linear model has no such edge: its score keeps moving in the same direction outside the training
-range, and logreg (trained only on the 8 basic character features) flags every dyre label.
+**Correction (Milestone 2).** The Milestone 1 README explained this as "a pattern trees cannot
+extrapolate to", because 34 characters is longer than any DGA label in training. The length fact
+is right, but the explanation is not:
+
+- **dyre is mostly inside the range the trees saw.** 17 training labels are 34 characters or
+  longer (up to 54), and all of them are benign. Only `digit_letter_transitions` goes beyond the
+  training range (5 to 27 for dyre, at most 20 in training).
+- **What pushes gb's misses toward benign is not length.** Mean SHAP contributions over gb's
+  1,062 dyre misses in `test_future`:
+  - `digit_ratio` −1.66 and `unique_char_ratio` −1.23 log-odds;
+  - `length` only −0.23.
+  - A label drawn from only 16 hex symbols has a low unique-character ratio, which among long
+    training labels was mostly benign. So the trees follow the nearest training examples, and
+    those are benign.
+- **It depends on the model, not on "trees" in general.** In the
+  [ablation](#feature-set-ablation-milestone-2), gb on the 8 basic features catches 0.2753 of
+  dyre, fewer than gb on all 15 (0.646). The M1 review expected the opposite (about 0.89 on the
+  basic features) from a HistGradientBoosting model with default settings. How a tree model scores
+  dyre depends on where its splits fall, which changes with the model and its settings.
+- **logreg's score is a weighted sum.** dyre's many digits and letter/digit switches push it
+  steadily toward dga, and logreg flags every dyre label with either feature set.
+
+dyre is in the third phase-in batch. Retraining on labelled dyre domains gives the trees DGA
+examples in this region.
 
 ## API
 
@@ -775,21 +972,122 @@ curl.exe https://dgalert.onrender.com/stats
   `/explain` puts `hyphen_count` at -7.50 log-odds. The cause is the training data: **0 of the
   76771 training DGA rows** have a hyphen in their second-level label, while hyphens do occur in
   benign names, so the model learned "hyphen = benign". This is also why matsnu is missed (see
-  [the drift story](#matsnu-hyphen--english-words--benign)). The planned fix is Milestone 2's
-  retraining on hyphenated families such as matsnu. Run it with `python -m scripts.hyphen_evasion`
-  (needs `data/processed/` and a trained model).
+  [the drift story](#matsnu-hyphen--english-words--benign)). Milestone 1 expected retraining on
+  hyphenated families such as matsnu to fix this. Round 1 showed it does not on its own: the
+  matsnu model flagged hyphenated benign sites instead and was rejected (see
+  [Project Focus](#project-focus)). The planned fix is hyphen-insensitive features. Run the check
+  with `python -m scripts.hyphen_evasion` (needs `data/processed/` and a trained model).
 - **False alarms dominate when DGA traffic is rare.** gb's false-positive rate on `test_seen` is
   **0.1066**, derived as 1 minus gb's `benign` recall on `test_seen` (0.8934) in
   `reports/per_family_recall.json`. `test_seen` is about half DGA, but real DNS traffic is mostly
   benign. Take 10,000 domains of which 1% (100) are DGA. With `recall_seen` 0.8853, gb finds about
   89 of the 100, but it also flags about 1,055 of the 9,900 benign domains (9,900 x 0.1066). Only
   about 7.7% of its alerts would be real (precision 88.53 / (88.53 + 1055.34) = 0.0774).
-  Threshold-independent metrics (ROC-AUC) and a separate validation split for model selection are
-  planned for Milestone 2.
+  Milestone 2 added a separate validation split, used to choose the retraining model's parameters
+  ([Retraining data](#retraining-data-milestone-2)). Threshold-independent metrics (ROC-AUC) and a
+  threshold chosen on validation for a target false-positive rate are planned for the final
+  presentation.
+- **Some "benign" labels are probably wrong (Tranco label noise).** Tranco ranks popular
+  domains; it does not check that they are harmless. Because the benign rows are sampled across
+  the whole top-1M list, they include long-tail names that look machine-generated, and some may
+  be malicious or parked. An example is `zpsczg.cn`, one of the benign domains newly flagged in
+  round 1. Every such domain counts as a false positive when the model flags it, so part of the
+  measured false-positive rate (0.1066) may be label noise rather than model error. We have not
+  measured how large that part is. Filtering suspicious Tranco tail domains is planned for the
+  final presentation.
 
 MLflow saves artifact locations as absolute paths, so the committed M1 store is only read through
 a working copy whose paths are rewritten for this machine (`src/m1_snapshot.py`,
 `src/mlflow_store.py`); see [MLflow stores and reports](#mlflow-stores-and-reports).
+
+## Changes since the proposal
+
+Quotes are from our Milestone 0 proposal.
+
+1. **Python 3.13, not 3.11.** The proposal's stack table says "Python 3.11" and
+   "Docker (python:3.11-slim base)".
+   - **Now:** Python 3.13 locally and in CI, and the image is based on
+     `python:3.13.18-slim-trixie`.
+   - **Why (our decision):** the pinned `numpy` 2.5.4 and `shap` 0.54.1 require Python 3.12 or
+     later.
+2. **A committed sample instead of the full UMUDGA dataset.** The proposal describes UMUDGA as
+   "~30M labeled DGA domains across 50 malware families", and `prepare_data.py` as the step that
+   "downloads UMUDGA + Tranco".
+   - **Now:** the pipeline uses a committed sample of about 234k domains: 3,000 per family for
+     the 46 usable families (138,000 DGA) plus 96,000 Tranco domains. `prepare_data` reads
+     `data/sample/` and downloads nothing.
+   - **Effect:** every run (local, CI, the retraining workflow) gets the same data without a
+     download.
+   - The sample is built once by `scripts/make_sample.py` from the raw files
+     ([Data](#data)).
+3. **chrmor/DGA_domains_dataset is not used.** The proposal planned it "for fast local iteration
+   and as a sanity-check source". The committed UMUDGA sample is the only DGA source, and Tranco
+   the only benign source.
+4. **MLflow uses SQLite stores.** The proposal planned a "local file-backed store, committed to
+   repo via mlruns/".
+   - **Now:** the M1 runs are a committed, read-only SQLite snapshot (`mlflow.db` + `mlruns/`).
+     New runs go to a gitignored local store, and the retraining runs to the workflow artifact.
+   - **Why:** MLflow 3 recommends SQLite for local tracking, and a store that every training run
+     rewrites does not belong in git (review finding B2).
+5. **Models are `.joblib`, not `.pkl`.** The proposal names "models/model_<timestamp>.pkl". The
+   production pointer also records the file's SHA-256, and the loader checks it.
+6. **`/stats` instead of `/metrics`.** The proposal's `/metrics` was to report "request count,
+   average latency, and the rolling distribution of predictions".
+   - **Now:** `GET /stats` returns request counts, latency and the prediction counts per label
+     since the service started, cumulative rather than rolling, as JSON.
+7. **`/explain` is a separate call.** The proposal said it "accompanies every /predict call".
+   - **Now:** `/explain` is its own endpoint, returning the same prediction plus the SHAP
+     contributions; `/predict` returns the prediction only.
+8. **No fresh Tranco sample per retraining round.** The proposal's workflow "pulls a refreshed
+   Tranco benign sample" each round.
+   - **Now:** every round uses the same Tranco list (`746WX`).
+   - **Why:** the gate compares champion and challenger on a frozen evaluation set, and a round
+     must be reproducible. With a new benign sample each round:
+     - the training data would change in two ways at once, and a change in the false-positive
+       rate could not be traced to the new families;
+     - new benign rows could overlap the frozen evaluation set.
+9. **The promotion gate was redesigned.** The proposal promotes "only if F1 on the frozen test set
+   strictly improves and the sanity-test suite passes".
+   - **Now:** six criteria ([Promotion gate](#promotion-gate-milestone-2)): recall on the new
+     families, F1 on the seen families, false-positive rate, recall on earlier phased-in families,
+     the sanity domains and the frozen hash. Both models are scored on the same rows, instead of
+     comparing stored numbers.
+   - **Why: round 1 shows the old rule would have promoted a worse model.**
+     - Overall F1 on the frozen set rose from 0.8870 to 0.8952, and the sanity domains passed
+       6/6.
+     - So the proposal's rule would have promoted the matsnu model.
+     - But its false-positive rate rose from 0.1066 to 0.1235 (396 more benign domains flagged).
+       On mostly-benign real traffic that means many more false alarms.
+     - The new gate rejected it on exactly that criterion (Actions run 45668715690; see
+       [Project Focus](#project-focus)).
+10. **Retraining is manual, with a weekly dry run, and promotes through a reviewed PR.** The
+    proposal's workflow "runs on a schedule and on manual trigger", and "Promotion rebuilds and
+    pushes a new Docker image tag; Render auto-deploys on the new image".
+    - **Now:** real rounds start only from a manual run on `main`, and the weekly scheduled run
+      is always a dry run.
+    - **A promotion opens a pull request** for the other member to review. Merging it builds,
+      tests and deploys the new image through the normal CI pipeline.
+    - **Why:** a model change goes through the same review and checks as a code change, and it
+      can be reverted like one ([RUNBOOK.md](RUNBOOK.md#roll-back-a-model)).
+11. **Retraining uses HistGradientBoosting.** The proposal's classifier is "a scikit-learn
+    gradient-boosted tree model".
+    - **Now:** the retraining loop fits `HistGradientBoostingClassifier`, also gradient-boosted
+      trees, with fixed parameters chosen once on the validation split.
+    - **Why:** it fits in about 10 seconds, against about 4.4 minutes for the M1
+      `GradientBoostingClassifier` (review finding B6).
+12. **CI does more than "runs on every push to main".**
+    - **Triggers:** it also runs on every pull request and on `v*` tags.
+    - **Image:** the image is published to GHCR as `sha-<short sha>`.
+    - **Deploy:** a `deploy` job ships that exact image to Render ([CI](#ci),
+      [Deployment](#deployment)).
+13. **Evidently (listed as optional) is not used.** Drift is measured through per-family recall
+    on the frozen evaluation set instead. Drift signals in `/stats` are planned for the final
+    presentation.
+14. **The UMUDGA citation.** The proposal names "an accompanying paper in Computers & Security".
+    The dataset itself is described in *Data in Brief* 30 (2020), 105400, which is the
+    reference we use everywhere ([Citations](#citations)).
+15. **Reviews.** The proposal's mitigation says "Both members review every PR". What the records
+    show is in [CONTRIBUTION.md](CONTRIBUTION.md).
 
 ## Tests
 
@@ -856,7 +1154,11 @@ alone with `pytest -m sanity`.
 
 - **UMUDGA**: M. Zago, M. Gil Pérez, G. Martínez Pérez. "UMUDGA: A dataset for profiling
   algorithmically generated domain names in botnet detection." *Data in Brief* 30 (2020), 105400.
+  DOI [10.1016/j.dib.2020.105400](https://doi.org/10.1016/j.dib.2020.105400).
   Dataset: Mendeley Data, DOI [10.17632/y8ph45msv8.1](https://doi.org/10.17632/y8ph45msv8.1) (MIT licence).
+  This is the reference used everywhere in the project, slides included. (The proposal named
+  *Computers & Security* as the venue. That journal has a companion research article; the dataset itself is
+  described in the *Data in Brief* paper.)
 - **Tranco**: V. Le Pochat, T. Van Goethem, S. Tajalizadehkhoob, M. Korczyński, W. Joosen.
   "Tranco: A Research-Oriented Top Sites Ranking Hardened Against Manipulation." *NDSS* 2019.
   List `746WX`: https://tranco-list.eu/list/746WX/1000000

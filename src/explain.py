@@ -1,14 +1,16 @@
 """Per-feature explanations of single predictions, toward the "dga" class.
 
 build_explainer() is called once (in the API's lifespan handler) and returns a DomainExplainer:
-- gb, rf:  shap.TreeExplainer. GB explains its log-odds; RF explains P(dga) (SHAP's "raw" output
-           for a random forest is the averaged leaf probability).
+- gb, hgb, rf: shap.TreeExplainer. GB and HGB (the retraining loop's
+           HistGradientBoostingClassifier) explain their log-odds; RF explains P(dga) (SHAP's "raw"
+           output for a random forest is the averaged leaf probability).
 - logreg:  no SHAP. The pipeline is StandardScaler + LogisticRegression on its own feature subset,
            so each selected feature contributes coefficient x standardized value to the log-odds
            (base value = intercept). Features the pipeline does not use contribute 0.
 
 In every case base_value + sum(contributions over all features) = the model's output for that
-domain (log-odds for gb/logreg, P(dga) for rf), and a positive contribution pushes toward "dga".
+domain (log-odds for gb/hgb/logreg, P(dga) for rf), and a positive contribution pushes toward
+"dga".
 """
 
 from dataclasses import dataclass
@@ -22,9 +24,15 @@ from sklearn.pipeline import Pipeline
 from src.features import FEATURE_NAMES, feature_frame
 
 DGA_CLASS = 1  # train.py encodes dga as 1, benign as 0
-TREE_MODEL_TYPES = ("gb", "rf")
-# Units of base_value and the contributions, per model type (see the module docstring).
-OUTPUT_UNITS: dict[str, str] = {"gb": "log_odds", "logreg": "log_odds", "rf": "probability"}
+TREE_MODEL_TYPES = ("gb", "rf", "hgb")
+# Units of base_value and the contributions, per model type (see the module docstring). hgb is
+# the retraining loop's HistGradientBoostingClassifier: one output, the log-odds of dga, like gb.
+OUTPUT_UNITS: dict[str, str] = {
+    "gb": "log_odds",
+    "hgb": "log_odds",
+    "logreg": "log_odds",
+    "rf": "probability",
+}
 
 
 @dataclass

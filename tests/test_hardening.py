@@ -205,7 +205,12 @@ def test_output_units_per_model_type(sample_xy: tuple[pd.DataFrame, pd.Series]) 
     logreg = build_logreg().fit(x, y)
     assert build_explainer(rf, "rf").output_units == "probability"
     assert build_explainer(logreg, "logreg").output_units == "log_odds"
-    assert OUTPUT_UNITS == {"gb": "log_odds", "logreg": "log_odds", "rf": "probability"}
+    assert OUTPUT_UNITS == {
+        "gb": "log_odds",
+        "hgb": "log_odds",  # the retraining loop's model type (src.retrain)
+        "logreg": "log_odds",
+        "rf": "probability",
+    }
 
 
 # ---------------------------------------------------------------------------

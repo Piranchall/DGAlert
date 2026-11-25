@@ -64,16 +64,19 @@ class StatsCollector:
         self._endpoints: dict[str, _EndpointStats] = {}
         self._label_counts: Counter[str] = Counter({label: 0 for label in LABELS})
         self._probability_total = 0.0
+        self._out_of_scope = 0
 
     def record_request(self, endpoint: str, status_code: int, latency_ms: float) -> None:
         with self._lock:
             self._overall.add(status_code, latency_ms)
             self._endpoints.setdefault(endpoint, _EndpointStats()).add(status_code, latency_ms)
 
-    def record_prediction(self, label: str, probability: float) -> None:
+    def record_prediction(self, label: str, probability: float, in_scope: bool = True) -> None:
         with self._lock:
             self._label_counts[label] += 1
             self._probability_total += probability
+            if not in_scope:
+                self._out_of_scope += 1
 
     def snapshot(self) -> dict[str, Any]:
         """All counters as plain JSON-ready values (model_version is added by the API)."""
@@ -95,6 +98,7 @@ class StatsCollector:
                     "count": predictions,
                     "by_label": dict(self._label_counts),
                     "mean_probability_dga": average(self._probability_total, predictions, 4),
+                    "out_of_scope": self._out_of_scope,
                 },
             }
 

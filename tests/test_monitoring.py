@@ -46,6 +46,7 @@ def test_empty_collector_snapshot() -> None:
         "count": 0,
         "by_label": {"benign": 0, "dga": 0},
         "mean_probability_dga": None,
+        "out_of_scope": 0,
     }
     assert snapshot["uptime_seconds"] >= 0
 
@@ -72,6 +73,7 @@ def test_collector_averages() -> None:
         "count": 3,
         "by_label": {"benign": 2, "dga": 1},
         "mean_probability_dga": 0.4,
+        "out_of_scope": 0,
     }
 
 

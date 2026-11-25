@@ -22,6 +22,7 @@ def test_health_with_model(client: TestClient) -> None:
     assert response.json() == {
         "status": "healthy",
         "model_loaded": True,
+        "explainer_loaded": True,
         "model_version": "test_fixture",
     }
 
@@ -37,7 +38,11 @@ def client_without_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 def test_health_without_model(client_without_model: TestClient) -> None:
     response = client_without_model.get("/health")
     assert response.status_code == 503
-    assert response.json() == {"status": "unhealthy", "model_loaded": False}
+    assert response.json() == {
+        "status": "unhealthy",
+        "model_loaded": False,
+        "explainer_loaded": False,
+    }
 
 
 def test_predict_without_model(client_without_model: TestClient) -> None:
@@ -65,7 +70,11 @@ def test_tampered_model_gives_503_and_logs_reason(
         predict = tampered_client.post("/predict", json={"domain": "google.com"})
 
     assert health.status_code == 503
-    assert health.json() == {"status": "unhealthy", "model_loaded": False}
+    assert health.json() == {
+        "status": "unhealthy",
+        "model_loaded": False,
+        "explainer_loaded": False,
+    }
     assert predict.status_code == 503
     assert "Could not load the model" in caplog.text
     assert f"expects {metadata['sha256']}" in caplog.text
@@ -80,7 +89,16 @@ def test_predict_valid(client: TestClient) -> None:
     response = client.post("/predict", json={"domain": "HTTP://Example.COM/path"})
     assert response.status_code == 200
     body = response.json()
-    assert set(body) == {"domain", "label", "probability", "model_version"}
+    assert set(body) == {
+        "domain",
+        "label",
+        "probability",
+        "model_version",
+        "in_scope",
+        "warning",
+    }
+    assert body["in_scope"] is True
+    assert body["warning"] is None
     assert body["domain"] == "example.com"
     assert body["label"] in {"benign", "dga"}
     assert 0.0 <= body["probability"] <= 1.0

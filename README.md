@@ -312,6 +312,9 @@ The real response for `wedding-muscle.com`, a matsnu domain from the held-out se
   "label": "benign",
   "probability": 0.0036,
   "model_version": "20261105_062411",
+  "in_scope": true,
+  "warning": null,
+  "output_units": "log_odds",
   "base_value": -0.03691765562588492,
   "top_contributing_features": [
     {"feature": "hyphen_count", "value": 1.0, "contribution": -3.42574984061764},
@@ -358,9 +361,10 @@ range, and logreg (trained only on the 8 basic character features) flags every d
 |---|---|---|
 | `POST` | `/predict` | Classify one domain: `label` (`benign` or `dga`) and P(dga) |
 | `POST` | `/explain` | The same prediction plus the top 5 SHAP feature contributions |
-| `GET` | `/health` | 200 when the model is loaded, 503 otherwise (used by health checks) |
+| `GET` | `/health` | Model and explainer status: 200 `healthy` or `degraded`, 503 `unhealthy` (used by health checks) |
 | `GET` | `/stats` | Request counts, latency and prediction statistics since the service started |
 | `GET` | `/docs` | Interactive OpenAPI docs with request and response examples |
+| `GET` | `/` | Redirects (307) to `/docs` |
 
 Start the server, then open **http://127.0.0.1:8000/docs** for the interactive OpenAPI docs (with
 request and response examples):
@@ -375,13 +379,33 @@ The model and the explainer are loaded once at startup from `models/production/l
 including a failed SHA-256 check, the service still starts: `/health` reports it, and `/predict`
 and `/explain` return 503.
 
-Input is normalized first (trimmed, lowercased; scheme, path, port and trailing dot removed, so
-`HTTP://Example.COM/path` becomes `example.com`). It must then be a valid DNS name: ASCII only, at
+The raw input may be at most 1,024 characters, checked before anything else (a domain is at most
+253; the rest leaves room for a pasted URL). It is then normalized (trimmed, lowercased; scheme,
+path, port and trailing dot removed, so `HTTP://Example.COM/path` becomes `example.com`) and must
+be a valid DNS name: ASCII only, at
 least one dot, labels of 1-63 letters/digits/hyphens with no leading or trailing hyphen, at most
 253 characters, and not a bare public suffix like `co.uk`. It must also end in a known public
 suffix: IP addresses (`8.8.8.8`) and internal names (`host.local`, `abc.internal`) are rejected,
 because the model never saw them in training and would score the wrong label (for
 `pidfksipycmyg.local` it would look at `local`). Anything else gets a 422 with a message.
+
+### Scope warnings
+
+Some valid domains are outside what the model can judge. They still get a prediction, but the
+response says `"in_scope": false` and gives a `warning`; for every other domain `in_scope` is
+`true` and `warning` is `null`. Both fields are in `/predict` and `/explain`, and `/stats` counts
+out-of-scope predictions in `predictions.out_of_scope`.
+
+- **Private suffixes** (C1), e.g. `x.blogspot.com`, `x.duckdns.org`, `x.github.io`: the features
+  use the second-level label under the *public* suffix list, which here is the provider's name
+  (`blogspot`), so the part a DGA would generate (`x`) is never seen. Detected with `tldextract`
+  including the list's private section. The provider's own domain (`blogspot.com`) is in scope.
+- **Punycode** (C2): any label starting with `xn--` (`xn--bcher-kva.de`, `example.xn--p1ai`).
+  These encode internationalized names, which the ASCII training data does not cover.
+
+```json
+{"domain": "abcxyzqwrtplk.blogspot.com", "label": "benign", "probability": 0.0451, "model_version": "20261105_062411", "in_scope": false, "warning": "'abcxyzqwrtplk.blogspot.com' is under the private suffix 'blogspot.com' (a hosting or dynamic-DNS provider); the model only sees the label 'blogspot', so the prediction says nothing about 'abcxyzqwrtplk'."}
+```
 
 ### `POST /predict`
 
@@ -390,16 +414,17 @@ curl -X POST http://127.0.0.1:8000/predict -H "Content-Type: application/json" -
 ```
 
 ```json
-{"domain": "moiqidfvjjhjmndqp.in", "label": "dga", "probability": 0.996, "model_version": "20261105_062411"}
+{"domain": "moiqidfvjjhjmndqp.in", "label": "dga", "probability": 0.996, "model_version": "20261105_062411", "in_scope": true, "warning": null}
 ```
 
 ```json
-{"domain": "teco.com.tw", "label": "benign", "probability": 0.0021, "model_version": "20261105_062411"}
+{"domain": "teco.com.tw", "label": "benign", "probability": 0.0021, "model_version": "20261105_062411", "in_scope": true, "warning": null}
 ```
 
 Both example domains are from `test_seen`, so the model never trained on them:
 `moiqidfvjjhjmndqp.in` is a `ranbyus_v2` DGA domain and `teco.com.tw` is a Tranco domain.
 `probability` is P(dga), rounded to 4 decimals; `label` is `dga` when it is at least 0.5.
+`in_scope` and `warning` are explained under [Scope warnings](#scope-warnings).
 
 Invalid input, HTTP 422. For `-bad.com`:
 
@@ -415,8 +440,10 @@ For `8.8.8.8`:
 
 ### `POST /explain`
 
-Same request and validation as `/predict`. The response adds `base_value` and the 5 features with
-the largest absolute contribution (see the `wedding-muscle.com` example above):
+Same request and validation as `/predict`. The response adds `base_value`, the 5 features with
+the largest absolute contribution, and `output_units`: the units of `base_value` and the
+contributions, `log_odds` for gb and logreg or `probability` (P(dga)) for rf (see the
+`wedding-muscle.com` example above):
 
 ```bash
 curl -X POST http://127.0.0.1:8000/explain -H "Content-Type: application/json" -d '{"domain": "wedding-muscle.com"}'
@@ -429,10 +456,17 @@ curl http://127.0.0.1:8000/health
 ```
 
 ```json
-{"status": "healthy", "model_loaded": true, "model_version": "20261105_062411"}
+{"status": "healthy", "model_loaded": true, "explainer_loaded": true, "model_version": "20261105_062411"}
 ```
 
-Without a model it returns HTTP 503 with `{"status": "unhealthy", "model_loaded": false}`.
+| `status` | HTTP | When |
+|---|---|---|
+| `healthy` | 200 | model and explainer loaded |
+| `degraded` | 200 | model loaded but the explainer failed: `/predict` works, `/explain` returns 503 |
+| `unhealthy` | 503 | no model (`{"status": "unhealthy", "model_loaded": false, "explainer_loaded": false}`) |
+
+`degraded` stays 200 so that Docker and Render health checks do not restart a service that still
+answers `/predict`; the body and the server log say what failed.
 
 ### `GET /stats`
 
@@ -457,7 +491,7 @@ curl http://127.0.0.1:8000/stats
       "POST /predict": {"count": 4, "by_status_class": {"2xx": 3, "4xx": 1}, "avg_latency_ms": 10.863}
     }
   },
-  "predictions": {"count": 3, "by_label": {"benign": 2, "dga": 1}, "mean_probability_dga": 0.3349}
+  "predictions": {"count": 3, "by_label": {"benign": 2, "dga": 1}, "mean_probability_dga": 0.3349, "out_of_scope": 1}
 }
 ```
 
@@ -465,7 +499,7 @@ curl http://127.0.0.1:8000/stats
   method and route. Requests that match no route (e.g. scans for `/wp-admin`) are grouped under
   `unmatched`. Latency is measured in the service, from request in to response out.
 - `predictions` covers successful `POST /predict` calls only (`/explain` is not counted):
-  the count per label and the mean P(dga).
+  the count per label, the mean P(dga), and how many were out of scope (`in_scope: false`).
 - **Counters are in memory and reset whenever the service restarts.** On Render's free tier an
   idle service is put to sleep and restarted on the next request, so `started_at` shows how long
   the counters cover. The `/stats` call itself is counted after its response is built.
@@ -540,6 +574,7 @@ CI (GitHub Actions, Ubuntu, Python 3.13) runs the same three commands on every p
 | `tests/test_model_loader.py` | loading via `latest.json`, the `MODEL_POINTER` override, missing or malformed pointers, SHA-256 check (tampered file refused, missing hash warns), scikit-learn version warning, the committed production model (fields, hash, loading from another working directory) |
 | `tests/test_app.py` | `/health` and `/predict`: success, 503 without a model or with a tampered model, every 422 validation rule |
 | `tests/test_monitoring.py` | `/stats` counts per endpoint and status class, latency, label counts matching `/predict`, `unmatched` paths, reset on restart, working without a model; thread-safe counters; one JSON log line per request with no request body |
+| `tests/test_hardening.py` | scope warnings for private suffixes and punycode (C1, C2) and their `/stats` count, `/health` `degraded` when the explainer fails (C3), the 1,024-character input limit checked before normalization (C4), `output_units` per model type (C5), `GET /` redirect (C6) |
 | `tests/test_explain.py` | `/explain` shape and agreement with `/predict`; SHAP additivity for gb, rf and the logreg fallback |
 | `tests/test_hyphen_evasion.py` | hyphen insertion in `scripts/hyphen_evasion.py` keeps the suffix and splits the label in the middle |
 

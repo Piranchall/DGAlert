@@ -6,7 +6,8 @@
 pyarrow==26.0.1
 mlflow==3.18.0
 
-# Tests and lint (httpx is needed by FastAPI's TestClient)
+# Tests and lint (httpx is needed by FastAPI's TestClient; pyyaml reads the CI workflow in tests)
 httpx==0.28.1
 pytest==9.2.0
+pyyaml==6.0.4
 ruff==0.17.3

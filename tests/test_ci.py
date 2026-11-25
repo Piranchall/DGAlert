@@ -12,7 +12,6 @@ WORKFLOW_PATH = config.ROOT_DIR / ".github" / "workflows" / "ci.yml"
 WORKFLOW = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
 JOBS = WORKFLOW["jobs"]
 DEPLOY_CONDITION = "github.event_name == 'push' && github.ref == 'refs/heads/main'"
-LIVE_URL = "https://dgalert.onrender.com"
 PUBLISH_CONDITION = (
     "github.event_name == 'push' && "
     "(github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))"
@@ -33,7 +32,8 @@ def step(job: str, name: str) -> dict:
 
 
 def uses(job: str) -> list[str]:
-    return [s["uses"] for s in steps(job) if "uses" in s]
+    # deploy has no steps: it calls a reusable workflow.
+    return [s["uses"] for s in JOBS[job].get("steps", []) if "uses" in s]
 
 
 def test_jobs_named_as_the_required_checks() -> None:
@@ -141,40 +141,13 @@ def test_deploy_runs_after_build_only_on_pushes_to_main() -> None:
     assert deploy["needs"] == "build"
     assert deploy["if"] == DEPLOY_CONDITION
     assert "refs/tags" not in deploy["if"]  # version tags publish an image but do not deploy
-    assert deploy["timeout-minutes"] <= 30
 
 
-def test_deploy_hook_comes_from_the_secret_and_is_never_echoed() -> None:
-    hook = step("deploy", "Trigger the Render deploy hook with the tested image")
-    assert hook["env"] == {"RENDER_DEPLOY_HOOK": "${{ secrets.RENDER_DEPLOY_HOOK }}"}
-    run = hook["run"]
-    assert '[ -z "$RENDER_DEPLOY_HOOK" ]' in run  # a missing secret fails the job
-    for line in run.splitlines():
-        if "echo" in line:
-            assert "$RENDER_DEPLOY_HOOK" not in line, line  # the name may appear, the value not
-    assert "-o /dev/null" in run  # the response body is not printed either
-
-
-def test_deploy_hook_deploys_the_tested_sha_tag() -> None:
-    run = step("deploy", "Trigger the Render deploy hook with the tested image")["run"]
-    assert 'image="$IMAGE:sha-${GITHUB_SHA::7}"' in run
-    assert "urllib.parse.quote" in run
-    assert r'case "$RENDER_DEPLOY_HOOK" in *\?*) sep="&" ;; *) sep="?" ;; esac' in run
-    assert '"${RENDER_DEPLOY_HOOK}${sep}imgURL=${encoded}"' in run
-
-
-def test_deploy_waits_for_the_live_git_sha_with_a_timeout() -> None:
-    run = step("deploy", "Wait until the live service reports this commit")["run"]
-    assert 'expected="${GITHUB_SHA::7}"' in run
-    assert '"$RENDER_URL/health"' in run
-    assert "seq 1 60" in run
-    assert "exit 1" in run
-
-
-def test_live_url_in_workflow_and_readme() -> None:
-    assert WORKFLOW["env"]["RENDER_URL"] == LIVE_URL
-    readme = (config.ROOT_DIR / "README.md").read_text(encoding="utf-8")
-    assert "## Deployment" in readme
-    assert "curl.exe" in readme
-    for endpoint in ("/health", "/predict", "/explain", "/stats"):
-        assert f"{LIVE_URL}{endpoint}" in readme
+def test_deploy_calls_the_reusable_workflow_with_the_tested_tag() -> None:
+    # The same workflow runs by hand for rollbacks (tests/test_deploy_workflow.py).
+    deploy = JOBS["deploy"]
+    assert deploy["uses"] == "./.github/workflows/deploy.yml"
+    assert deploy["with"] == {"tag": "sha-${{ needs.build.outputs.short }}"}
+    assert JOBS["build"]["outputs"]["short"] == "${{ steps.sha.outputs.short }}"
+    # The secret is passed explicitly, not with "secrets: inherit".
+    assert deploy["secrets"] == {"RENDER_DEPLOY_HOOK": "${{ secrets.RENDER_DEPLOY_HOOK }}"}

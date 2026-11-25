@@ -560,11 +560,17 @@ Every merge to `main` deploys itself, with no manual step:
 
 1. CI's `lint` and `test` pass, and `build` builds the image, smoke-tests it and pushes it to GHCR
    as `sha-<short sha>` and `main` (see [CI](#ci)).
-2. The `deploy` job calls the service's deploy hook (GitHub secret `RENDER_DEPLOY_HOOK`) with
-   `imgURL=ghcr.io/piranchall/dgalert:sha-<short sha>`, so Render runs exactly the image that was
-   tested, not whatever `:main` points to at that moment.
-3. `deploy` then polls https://dgalert.onrender.com/health every 10 seconds until `git_sha` is the
+2. The `deploy` job runs the reusable workflow `.github/workflows/deploy.yml` with that `sha-`
+   tag. It checks that the image exists, then calls the service's deploy hook (GitHub secret
+   `RENDER_DEPLOY_HOOK`) with `imgURL=ghcr.io/piranchall/dgalert:sha-<short sha>`, so Render runs
+   exactly the image that was tested, not whatever `:main` points to at that moment.
+3. It then polls https://dgalert.onrender.com/health every 10 seconds until `git_sha` is the
    merged commit, and fails after about 10 minutes if it never is.
+
+Rollbacks and roll-forwards use the same workflow by hand, with no Render login
+(`gh workflow run deploy.yml -f tag=sha-<short sha>`): see [RUNBOOK.md](RUNBOOK.md), which also
+covers model rollbacks, running a production image locally and what to check when the health
+check fails.
 
 Version tags (`v*`) publish an image but do not deploy. **Cold starts:** a free instance stops
 after about 15 minutes without traffic, and the next request waits (up to about a minute) while
@@ -651,7 +657,7 @@ pushes to `main` and on `v*` tags. `lint`, `test` and `build` are the required s
 | `lint` | `ruff check` and `ruff format --check` (installs only the ruff version pinned in `requirements.txt`) |
 | `test` | `pytest -q` with `requirements.txt`, including the sanity tests on the production model |
 | `build` | after `lint` and `test` pass: builds the Docker image with `GIT_SHA`, waits until Docker reports it healthy, checks that `/health` shows that commit and that `/predict` labels `moiqidfvjjhjmndqp.in` as `dga`, then stops it |
-| `deploy` | pushes to `main` only, after `build`: deploys the image's `sha-` tag to Render and waits until the live `/health` reports the commit (see [Deployment](#deployment)) |
+| `deploy` | pushes to `main` only, after `build`: runs `deploy.yml` with the image's `sha-` tag, which deploys it to Render and waits until the live `/health` reports the commit (see [Deployment](#deployment)) |
 
 On pushes to `main` and `v*` tags only, `build` then pushes **the image it just tested** to the
 GitHub Container Registry as `ghcr.io/piranchall/dgalert:sha-<short sha>`, plus `:main` or the
@@ -673,7 +679,8 @@ docker run --rm -p 8000:8000 ghcr.io/piranchall/dgalert:main
 | `tests/test_app.py` | `/health` and `/predict`: success, 503 without a model or with a tampered model, every 422 validation rule |
 | `tests/test_monitoring.py` | `/stats` counts per endpoint and status class, latency, label counts matching `/predict`, `unmatched` paths, reset on restart, working without a model; thread-safe counters; one JSON log line per request with no request body |
 | `tests/test_hardening.py` | scope warnings for private suffixes and punycode (C1, C2) and their `/stats` count, `/health` `degraded` when the explainer fails (C3), the 1,024-character input limit checked before normalization (C4), `output_units` per model type (C5), `GET /` redirect (C6) |
-| `tests/test_ci.py` | the CI workflow: jobs `lint`, `test`, `build` (build after the other two), triggers, pinned ruff, `packages: write` only for `build`, publishing only on pushes to `main` and `v*` tags, lowercase image name, smoke test with a timeout, `deploy` only on pushes to `main` with the hook from the secret (never echoed) and the `sha-` tag, live URL in the workflow and the README |
+| `tests/test_ci.py` | the CI workflow: jobs `lint`, `test`, `build` (build after the other two), triggers, pinned ruff, `packages: write` only for `build`, publishing only on pushes to `main` and `v*` tags, lowercase image name, smoke test with a timeout, `deploy` only on pushes to `main`, calling `deploy.yml` with the tested `sha-` tag |
+| `tests/test_deploy_workflow.py` | `deploy.yml`: manual and CI triggers with a required tag, tag format (accepted and rejected examples), the tag reaching shell only through `env`, image-exists check before the hook, hook from the secret (never echoed) with `imgURL`, wait for the tag's commit with a timeout, one deploy at a time; README Deployment section; `RUNBOOK.md` commands match the workflow and its required sections |
 | `tests/test_docker.py` | `GIT_SHA` in `/health` (set, unset, and in the 503 body); static checks of the `Dockerfile` (pinned base image in both stages, only `requirements-api.txt`, non-root user, health check, port, command) and `.dockerignore` |
 | `tests/test_explain.py` | `/explain` shape and agreement with `/predict`; SHAP additivity for gb, rf and the logreg fallback |
 | `tests/test_hyphen_evasion.py` | hyphen insertion in `scripts/hyphen_evasion.py` keeps the suffix and splits the label in the middle |

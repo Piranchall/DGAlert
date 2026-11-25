@@ -1,0 +1,101 @@
+name: Deploy to Render
+
+# Deploys one image tag (sha-<short commit>) from GHCR to the Render service, then waits until the
+# live /health reports that commit. ci.yml calls it after every push to main; run it by hand for a
+# rollback or roll-forward (no Render login needed, see RUNBOOK.md):
+#   gh workflow run deploy.yml -f tag=sha-<short commit>
+# sha- images exist only for commits on main from S6 onward; older commits have no image.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to deploy: sha-<7-character commit>, e.g. sha-4e822c5"
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      tag:
+        description: "Image tag to deploy: sha-<7-character commit>"
+        required: true
+        type: string
+    secrets:
+      RENDER_DEPLOY_HOOK:
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/piranchall/dgalert # GHCR names must be lowercase
+  RENDER_URL: https://dgalert.onrender.com
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # One deploy at a time, manual or from CI (concurrency groups are repo-wide): a rollback and a
+    # merge-triggered deploy queue up instead of racing.
+    concurrency:
+      group: render-deploy
+      cancel-in-progress: false
+    env:
+      # The input reaches the scripts only through this variable, never as an expression inside
+      # run:, so a crafted tag cannot inject shell code.
+      TAG: ${{ inputs.tag }}
+    steps:
+      - name: Check the tag format
+        run: |
+          if [[ ! "$TAG" =~ ^sha-[0-9a-f]{7}$ ]]; then
+            echo "::error::the tag must be sha- followed by 7 lowercase hex characters, e.g. sha-4e822c5"
+            exit 1
+          fi
+          echo "tag $TAG"
+
+      - name: Check that the image exists in GHCR
+        run: |
+          if ! docker manifest inspect "$IMAGE:$TAG" > /dev/null; then
+            echo "::error::$IMAGE:$TAG not found in GHCR (sha- images exist only for commits on main from S6 onward)"
+            exit 1
+          fi
+          echo "$IMAGE:$TAG exists"
+
+      # Render's imgURL overrides the tag for this one deploy; the rest of the URL must match the
+      # service's image (ghcr.io/piranchall/dgalert).
+      - name: Trigger the Render deploy hook with this image
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK" ]; then
+            echo "::error::the RENDER_DEPLOY_HOOK secret is not set"
+            exit 1
+          fi
+          image="$IMAGE:$TAG"
+          encoded="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$image")"
+          case "$RENDER_DEPLOY_HOOK" in *\?*) sep="&" ;; *) sep="?" ;; esac
+          echo "deploying $image"
+          # The hook URL holds a key: never echo it, and print only the HTTP status.
+          status="$(curl -sS -o /dev/null -w '%{http_code}' -X POST "${RENDER_DEPLOY_HOOK}${sep}imgURL=${encoded}" || true)"
+          echo "deploy hook returned HTTP $status"
+          case "$status" in
+            2??) echo "deploy of $image requested" >> "$GITHUB_STEP_SUMMARY" ;;
+            *) echo "::error::deploy hook failed (HTTP $status)"; exit 1 ;;
+          esac
+
+      - name: Wait until the live service reports this commit
+        run: |
+          expected="${TAG#sha-}"
+          body=""
+          for attempt in $(seq 1 60); do
+            body="$(curl -sS --max-time 30 "$RENDER_URL/health" || true)"
+            sha="$(python3 -c 'import json, sys; print(json.loads(sys.argv[1]).get("git_sha", ""))' "$body" 2>/dev/null || true)"
+            echo "attempt $attempt: git_sha=${sha:-<no answer>}"
+            if [ "$sha" = "$expected" ]; then
+              echo "$RENDER_URL runs $expected" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::$RENDER_URL did not report git_sha $expected in time"
+          echo "last /health response: $body"
+          exit 1

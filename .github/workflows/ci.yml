@@ -3,7 +3,8 @@ name: CI
 # Three jobs, whose IDs are the required status checks: lint, test, build.
 # build smoke-tests the Docker image on every run and publishes it to GHCR only on pushes to main
 # and v* tags (never from pull requests). deploy (pushes to main only, so not a required check)
-# deploys that same image to Render and waits until the live /health reports the commit.
+# deploys that same image to Render through deploy.yml and waits until the live /health reports
+# the commit.
 
 on:
   push:
@@ -22,7 +23,6 @@ permissions:
 
 env:
   IMAGE: ghcr.io/piranchall/dgalert # GHCR names must be lowercase
-  RENDER_URL: https://dgalert.onrender.com
   PYTHON_VERSION: "3.13"
 
 jobs:
@@ -73,6 +73,8 @@ jobs:
     permissions:
       contents: read
       packages: write # push to GHCR (only used on main and v* tags)
+    outputs:
+      short: ${{ steps.sha.outputs.short }} # for deploy's image tag
     steps:
       - uses: actions/checkout@v7
 
@@ -154,45 +156,10 @@ jobs:
   deploy:
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      # Deploys the sha- tag that build just tested and pushed, not :main. Render's imgURL
-      # overrides the tag for this one deploy; the rest of the URL must match the service's image.
-      - name: Trigger the Render deploy hook with the tested image
-        env:
-          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
-        run: |
-          if [ -z "$RENDER_DEPLOY_HOOK" ]; then
-            echo "::error::the RENDER_DEPLOY_HOOK secret is not set"
-            exit 1
-          fi
-          image="$IMAGE:sha-${GITHUB_SHA::7}"
-          encoded="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$image")"
-          case "$RENDER_DEPLOY_HOOK" in *\?*) sep="&" ;; *) sep="?" ;; esac
-          echo "deploying $image"
-          # The hook URL holds a key: never echo it, and print only the HTTP status.
-          status="$(curl -sS -o /dev/null -w '%{http_code}' -X POST "${RENDER_DEPLOY_HOOK}${sep}imgURL=${encoded}" || true)"
-          echo "deploy hook returned HTTP $status"
-          case "$status" in
-            2??) echo "deploy of $image requested" >> "$GITHUB_STEP_SUMMARY" ;;
-            *) echo "::error::deploy hook failed (HTTP $status)"; exit 1 ;;
-          esac
-
-      - name: Wait until the live service reports this commit
-        run: |
-          expected="${GITHUB_SHA::7}"
-          body=""
-          for attempt in $(seq 1 60); do
-            body="$(curl -sS --max-time 30 "$RENDER_URL/health" || true)"
-            sha="$(python3 -c 'import json, sys; print(json.loads(sys.argv[1]).get("git_sha", ""))' "$body" 2>/dev/null || true)"
-            echo "attempt $attempt: git_sha=${sha:-<no answer>}"
-            if [ "$sha" = "$expected" ]; then
-              echo "$RENDER_URL runs $expected" >> "$GITHUB_STEP_SUMMARY"
-              exit 0
-            fi
-            sleep 10
-          done
-          echo "::error::$RENDER_URL did not report git_sha $expected in time"
-          echo "last /health response: $body"
-          exit 1
+    # The same workflow is run by hand for rollbacks (RUNBOOK.md). It deploys the sha- tag that
+    # build just tested and pushed, not :main.
+    uses: ./.github/workflows/deploy.yml
+    with:
+      tag: sha-${{ needs.build.outputs.short }}
+    secrets:
+      RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}

@@ -66,6 +66,7 @@ venv\Scripts\python -m pytest -q
 
 venv\Scripts\python -m src.prepare_data          # writes data/processed/
 venv\Scripts\python -m src.prepare_retrain       # retraining data + reports/eval_frozen.json (after prepare_data)
+venv\Scripts\python -m src.retrain --dry-run     # one retraining round, gate only (after prepare_retrain)
 venv\Scripts\python -m src.train --model all     # trains logreg, rf, gb; writes models/latest.json
 venv\Scripts\mlflow ui --backend-store-uri sqlite:///mlflow_local/mlflow.db   # your runs, http://127.0.0.1:5000
 
@@ -84,6 +85,7 @@ Linux/macOS equivalents (see `Makefile`):
 | venv + install | `make setup` |
 | prepare data | `make data` |
 | retraining data (after `make data`) | `make retrain-data` |
+| one retraining round, dry run (after `make retrain-data`) | `make retrain-dry-run` |
 | train (all models) | `make train` |
 | rebuild `reports/` | `make report` |
 | browse the M1 runs (copy + `mlflow ui` command) | `make mlflow-m1` |
@@ -290,6 +292,66 @@ message), and both models' metrics side by side: overall precision, recall and F
 new-family and earlier-family recall, false-positive rate, recall per family, and the sanity
 labels. `src/train.py`'s `promote_if_better` (higher stored `f1_seen`) stays for reproducing
 Milestone 1 only.
+
+### Retraining loop (Milestone 2)
+
+`src/retrain.py` runs one round: it phases in the next batch of held-out families, retrains, and
+lets the gate decide.
+
+1. **Plan the round.** Read the production pointer (`models/production/latest.json`): its `round` (0
+   for the M1 model) and `phased_in_families`. Take the next batch of `config.PHASE_IN_BATCHES`.
+2. **Train.** Fit a `HistGradientBoostingClassifier` (model type `hgb`) on `train_fit` plus the
+   phase-in pool rows of every phased-in family, earlier and new.
+   - The parameters are fixed in `config.HGB_PARAMS`, so a round is deterministic and takes one
+     fit (about 10 s).
+   - They were chosen once by `scripts/select_hgb_params.py`: 16 grid points, each fit on
+     `train_fit` and scored by F1 on `validation`, results in
+     `reports/retrain/hgb_param_search.json`.
+   - Of the three points within 0.001 of the best F1 (0.8902), the cheapest won: learning rate
+     0.1, 200 iterations, 63 leaves, F1 0.8894.
+3. **Gate.** Run the promotion gate against the production model on the frozen eval set.
+4. **Log.** Record the run in MLflow (experiment `dgalert-m2-kaizen`): parameters, both models'
+   gate metrics, and the decision as an artifact.
+5. **Report.** Always write `reports/retrain/round_<n>.json` and `round_<n>.md` (the gate report).
+6. **On promotion** (not with `--dry-run`):
+   - save the new model in `models/production/` and delete the old model file;
+   - write `latest.json` (with `round`, `phased_in_families` and the frozen set's hash);
+   - write `reports/production_model.json`.
+   - To roll back a promoted model, see [RUNBOOK.md](RUNBOOK.md#roll-back-a-model).
+
+```powershell
+venv\Scripts\python -m src.prepare_data
+venv\Scripts\python -m src.prepare_retrain
+venv\Scripts\python -m src.retrain --dry-run   # train and gate only; models/production/ unchanged
+```
+
+**In GitHub Actions** (`.github/workflows/retrain.yml`):
+- **Real rounds are manual:** Actions → "Retrain" → Run workflow on `main`, with *dry_run*
+  unticked. When the gate promotes, the run opens the PR **"retrain: round <n> (automated)"** from
+  `retrain/round-<n>`, with the gate report as its body.
+  - The PR is opened with `RETRAIN_PR_TOKEN`, a fine-grained token of one member (this repo only,
+    Contents and Pull requests read/write), and review is requested from the other member.
+  - A PR opened with the default `GITHUB_TOKEN` would not trigger CI, and the ruleset would block
+    its merge.
+  - Merging the PR runs CI, publishes a new image and deploys it, and `/health` then shows the new
+    `model_version`.
+- **The weekly run (Mondays 03:00 UTC) is always a dry run.**
+- **What every run does:** regenerates the data from `data/sample`, writes the frozen eval report
+  to a temporary file so the committed `reports/eval_frozen.json` stays the reference, and uploads
+  the MLflow store and the round report as an artifact (kept 90 days).
+- **No duplicates:** a run does nothing while the PR for its round is still open.
+
+**A rejected batch is retried unchanged.** The data is fixed and training is deterministic, so
+every later round with the same features and parameters gets the same decision.
+- **Round 1 locally:** the dry run of round 1 (matsnu) was rejected on the false-positive rate.
+  - matsnu recall: 0.056 → 0.873.
+  - Seen F1: −0.004.
+  - False-positive rate: 0.1066 → 0.1235, a rise of +0.0169 against the 0.005 allowed.
+- **The planned fix** for the final presentation is hyphen-insensitive features.
+
+**Note:** once a retrained model is in production, its MLflow run lives in the workflow artifact,
+not in `mlflow_local/`. `python -m src.report` then needs `DGALERT_MLFLOW_TRACKING_URI` pointing at
+the downloaded artifact's `mlflow.db`.
 
 ## Results
 
@@ -743,7 +805,9 @@ docker run --rm -p 8000:8000 ghcr.io/piranchall/dgalert:main
 | `tests/test_gate.py` | promote; reject on each of the six criteria alone; several failures all listed; inclusive boundaries; earlier-family criterion passes with no earlier families and catches a collapse that seen F1 misses; stored metrics ignored; committed hash used by default; configuration errors raise; deterministic JSON; end to end with two small real models on `data/sample` |
 | `tests/test_prepare_retrain.py` | hash rule and content-hash format, parts cover the inputs, no label shared between any two parts, about 10% / 20% per family, output independent of row order, membership stable when rows or families are added, one label stays on one side, phase-in batches; on the committed sample: M1 split counts unchanged, frozen eval report equal to the committed one, same hash on a second run |
 | `tests/test_train.py` | training on a tiny fixture, MLflow runs, `latest.json` promotion (with `sha256`) and `--force`, report generation, training refuses the committed store and never writes `reports/`, `production_model.json` lookup across stores (deterministic, no paths or times) |
-| `tests/test_m1_snapshot.py` | the committed `mlflow.db` hash and `mlruns/` unchanged after the viewer command, the copy relocated and refreshed, a changed snapshot refused, `reports/` rebuilt from the snapshot equal to the committed files (parsed JSON) |
+| `tests/test_m1_snapshot.py` | the committed `mlflow.db` hash and `mlruns/` unchanged after the viewer command, the copy relocated and refreshed, a changed snapshot refused, `reports/` rebuilt from the snapshot equal to the committed files (parsed JSON); `reports/production_model.json` matches the production pointer (rebuilt from the snapshot while production is the M1 model) |
+| `tests/test_retrain.py` | round planning (next batch, partly phased-in batch refused), training rows, fixed HGB parameters match the search; one round on a small setup from `data/sample` with a temporary production folder and MLflow store: promotion replaces the model (old file deleted, loader and explainer accept the new one, `round` and `phased_in_families` updated, production report from the run), rejection and dry run leave production byte-identical, a second round with earlier families, nothing left to phase in, real gate reasons and MLflow run, frozen-hash mismatch rejects; workflow outputs and Markdown report |
+| `tests/test_retrain_workflow.py` | `retrain.yml`: manual dispatch defaults to a dry run, the weekly schedule is always dry, real rounds only on `main`, read-only permissions, step order, the committed frozen report not overwritten, artifact always uploaded, open round PR not duplicated, PR only on a real promotion with `RETRAIN_PR_TOKEN` (title, contents, bot commit, reviewer is the other member), no expressions inside shell scripts |
 | `tests/test_model_loader.py` | loading via `latest.json`, the `MODEL_POINTER` override, missing or malformed pointers, SHA-256 check (tampered file refused, missing hash warns), scikit-learn version warning, the committed production model (fields, hash, loading from another working directory) |
 | `tests/test_app.py` | `/health` and `/predict`: success, 503 without a model or with a tampered model, every 422 validation rule |
 | `tests/test_monitoring.py` | `/stats` counts per endpoint and status class, latency, label counts matching `/predict`, `unmatched` paths, reset on restart, working without a model; thread-safe counters; one JSON log line per request with no request body |
@@ -751,7 +815,7 @@ docker run --rm -p 8000:8000 ghcr.io/piranchall/dgalert:main
 | `tests/test_ci.py` | the CI workflow: jobs `lint`, `test`, `build` (build after the other two), triggers, pinned ruff, `packages: write` only for `build`, publishing only on pushes to `main` and `v*` tags, lowercase image name, smoke test with a timeout, `deploy` only on pushes to `main`, calling `deploy.yml` with the tested `sha-` tag |
 | `tests/test_deploy_workflow.py` | `deploy.yml`: manual and CI triggers with a required tag, tag format (accepted and rejected examples), the tag reaching shell only through `env`, image-exists check before the hook, hook from the secret (never echoed) with `imgURL`, wait for the tag's commit with a timeout, one deploy at a time; README Deployment section; `RUNBOOK.md` commands match the workflow, its required sections, placeholders instead of example tags in rollback and roll-forward, the wait before picking the newest run, and the rehearsal record |
 | `tests/test_docker.py` | `GIT_SHA` in `/health` (set, unset, and in the 503 body); static checks of the `Dockerfile` (pinned base image in both stages, only `requirements-api.txt`, non-root user, health check, port, command) and `.dockerignore` |
-| `tests/test_explain.py` | `/explain` shape and agreement with `/predict`; SHAP additivity for gb, rf and the logreg fallback |
+| `tests/test_explain.py` | `/explain` shape and agreement with `/predict`; SHAP additivity for gb, hgb, rf and the logreg fallback |
 | `tests/test_hyphen_evasion.py` | hyphen insertion in `scripts/hyphen_evasion.py` keeps the suffix and splits the label in the middle |
 
 The tests run from a clean clone with no `data/raw/`, `data/processed/` or trained candidate in

@@ -9,10 +9,12 @@
 #   test:   venv\Scripts\python -m pytest -q
 #   lint:   venv\Scripts\ruff check src tests scripts ; venv\Scripts\ruff format --check src tests scripts
 #   serve:  venv\Scripts\python -m uvicorn src.app:app --reload
+#   docker-build: docker build --build-arg GIT_SHA=$(git rev-parse --short HEAD) -t dgalert:local .
+#   docker-run:   docker run --rm -p 8000:8000 --name dgalert dgalert:local
 
 PY := venv/bin/python
 
-.PHONY: setup data train report mlflow-m1 test lint serve
+.PHONY: setup data train report mlflow-m1 test lint serve docker-build docker-run
 
 setup:
 	test -d venv || python3.13 -m venv venv
@@ -40,3 +42,11 @@ lint:
 
 serve:
 	$(PY) -m uvicorn src.app:app --reload
+
+# Build the API image, tagged with the current commit (shown as git_sha in /health)
+docker-build:
+	docker build --build-arg GIT_SHA=$$(git rev-parse --short HEAD) -t dgalert:local .
+
+# Run it on http://127.0.0.1:8000 (Ctrl+C stops and removes the container)
+docker-run:
+	docker run --rm -p 8000:8000 --name dgalert dgalert:local

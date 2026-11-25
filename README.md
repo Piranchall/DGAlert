@@ -65,6 +65,7 @@ venv\Scripts\python -m uvicorn src.app:app       # serves the committed model; n
 venv\Scripts\python -m pytest -q
 
 venv\Scripts\python -m src.prepare_data          # writes data/processed/
+venv\Scripts\python -m src.prepare_retrain       # retraining data + reports/eval_frozen.json (after prepare_data)
 venv\Scripts\python -m src.train --model all     # trains logreg, rf, gb; writes models/latest.json
 venv\Scripts\mlflow ui --backend-store-uri sqlite:///mlflow_local/mlflow.db   # your runs, http://127.0.0.1:5000
 
@@ -82,6 +83,7 @@ Linux/macOS equivalents (see `Makefile`):
 |---|---|
 | venv + install | `make setup` |
 | prepare data | `make data` |
+| retraining data (after `make data`) | `make retrain-data` |
 | train (all models) | `make train` |
 | rebuild `reports/` | `make report` |
 | browse the M1 runs (copy + `mlflow ui` command) | `make mlflow-m1` |
@@ -223,6 +225,42 @@ pronounceable or seed-based (banjori, simda, sisron) and random-character famili
 
 Second-level labels shared between train and test_seen: **0**. Between train and test_future: **0**
 (`data/processed/split_report.json`).
+
+### Retraining data (Milestone 2)
+
+`src/prepare_retrain.py` (run after `prepare_data`) derives the data for the retraining loop from
+the three splits above, which it does not change:
+
+| Part | Rows | What it is |
+|---|---|---|
+| `train_fit` | 138248 | train minus validation: what retraining fits on (plus phased-in rows) |
+| `validation` | 15379 | about 10% of train, for choosing hyperparameters |
+| `phase_in_pool` | 33570 | about 80% of each held-out family: added to training one batch per round |
+| `eval_frozen` | 46800 | `test_seen` (38373) + about 20% of each held-out family (8427): the fixed set every candidate is scored on |
+
+- **One rule for both selections.** A second-level label goes to the frozen eval slice (or to
+  validation) when `sha256("<salt>:<label>")`, read as a fraction, is below 0.2 (or 0.1).
+  - The salts are `frozen-eval` and `validation`.
+  - Membership depends only on the label, so it does not change when other rows or families
+    change, and every domain with the same label lands on the same side.
+  - Actual shares: 19.0% to 21.0% per held-out family, and 9.1% to 11.4% per family of train.
+- **No leakage.** No second-level label is shared between any two parts; the script checks this
+  and stops if one is.
+- **Frozen hash.** The frozen eval set's hash (SHA-256 over its sorted `domain,label` lines) and its
+  rows per family are committed in `reports/eval_frozen.json` (`sha256` `78f48f6b…`). The promotion
+  gate (slice S10) is to refuse to compare models on a set with another hash.
+- **Phase-in batches** (`config.PHASE_IN_BATCHES`), ordered by M1 gb recall on test_future, worst
+  first:
+
+| Batch | Families | M1 gb recall | Pool rows | Frozen eval rows |
+|---|---|---|---|---|
+| 1 | matsnu | 0.049 | 2409 | 589 |
+| 2 | nymaim, simda | 0.211, 0.432 | 2391, 2430 | 609, 569 |
+| 3 | dyre, shiotob | 0.646, 0.740 | 2381, 2370 | 619, 630 |
+| never (control) | banjori, sisron, padcrypt, necurs, qakbot, tinba, murofet_v1, murofet_v2, murofet_v3 | 0.98 to 1.00 | 21589 | 5411 |
+
+The control families are never phased in. Their recall cannot rise by the gate's margin, and
+keeping them unseen still measures how the model does on families it was never trained on.
 
 ## Results
 
@@ -673,6 +711,7 @@ docker run --rm -p 8000:8000 ghcr.io/piranchall/dgalert:main
 | `tests/test_config.py` | paths inside the repo, local MLflow store and its env-var overrides, working folders gitignored, seed, family lists disjoint |
 | `tests/test_features.py` | normalization, second-level label extraction, every feature, dictionary split |
 | `tests/test_prepare_data.py` | validation drops, grouped split with no shared labels, held-out families only in test_future, identical output on a rerun |
+| `tests/test_prepare_retrain.py` | hash rule and content-hash format, parts cover the inputs, no label shared between any two parts, about 10% / 20% per family, output independent of row order, membership stable when rows or families are added, one label stays on one side, phase-in batches; on the committed sample: M1 split counts unchanged, frozen eval report equal to the committed one, same hash on a second run |
 | `tests/test_train.py` | training on a tiny fixture, MLflow runs, `latest.json` promotion (with `sha256`) and `--force`, report generation, training refuses the committed store and never writes `reports/`, `production_model.json` lookup across stores (deterministic, no paths or times) |
 | `tests/test_m1_snapshot.py` | the committed `mlflow.db` hash and `mlruns/` unchanged after the viewer command, the copy relocated and refreshed, a changed snapshot refused, `reports/` rebuilt from the snapshot equal to the committed files (parsed JSON) |
 | `tests/test_model_loader.py` | loading via `latest.json`, the `MODEL_POINTER` override, missing or malformed pointers, SHA-256 check (tampered file refused, missing hash warns), scikit-learn version warning, the committed production model (fields, hash, loading from another working directory) |

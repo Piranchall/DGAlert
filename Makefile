@@ -6,6 +6,7 @@
 #   retrain-data: venv\Scripts\python -m src.prepare_retrain
 #   retrain-dry-run: venv\Scripts\python -m src.retrain --dry-run
 #   train:  venv\Scripts\python -m src.train
+#   ablation: venv\Scripts\python -m scripts.ablation
 #   report: venv\Scripts\python -m src.report
 #   mlflow-m1: venv\Scripts\python -m src.m1_snapshot
 #   test:   venv\Scripts\python -m pytest -q
@@ -16,7 +17,7 @@
 
 PY := venv/bin/python
 
-.PHONY: setup data retrain-data retrain-dry-run train report mlflow-m1 test lint serve docker-build docker-run
+.PHONY: setup data retrain-data retrain-dry-run train ablation report mlflow-m1 test lint serve docker-build docker-run
 
 setup:
 	test -d venv || python3.13 -m venv venv
@@ -35,6 +36,10 @@ retrain-dry-run:
 
 train:
 	$(PY) -m src.train
+
+# Feature-set ablation: logreg and gb x 8 basic and all 15 features (about 3 min; needs `make data`)
+ablation:
+	$(PY) -m scripts.ablation
 
 report:
 	$(PY) -m src.report

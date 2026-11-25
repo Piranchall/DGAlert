@@ -180,6 +180,12 @@ HGB_PARAMS: dict = {
     "random_state": SEED,
 }
 
+# ---------------------------------------------------------------------------
+# Feature-set ablation (scripts/ablation.py)
+# ---------------------------------------------------------------------------
+MLFLOW_ABLATION_EXPERIMENT_NAME: str = "dgalert-m2-ablation"
+ABLATION_REPORT_PATH: Path = REPORTS_DIR / "ablation.json"
+
 # Domains every served model must classify correctly (the gate's sanity criterion and the sanity
 # tests on the production model).
 SANITY_DOMAINS: list[tuple[str, str]] = [

@@ -1,0 +1,473 @@
+{
+  "question": "Is the logreg/trees gap the model family or the feature set? (M1 review, A2)",
+  "positive_class": "dga",
+  "threshold": 0.5,
+  "seed": 42,
+  "rows": {
+    "train": 153627,
+    "test_seen": 38373,
+    "test_future": 61141
+  },
+  "feature_sets": {
+    "basic": [
+      "length",
+      "digit_ratio",
+      "vowel_ratio",
+      "hyphen_count",
+      "entropy",
+      "unique_char_ratio",
+      "longest_consonant_run",
+      "digit_letter_transitions"
+    ],
+    "all": [
+      "length",
+      "digit_ratio",
+      "vowel_ratio",
+      "hyphen_count",
+      "entropy",
+      "unique_char_ratio",
+      "longest_consonant_run",
+      "digit_letter_transitions",
+      "bigram_mean_logfreq",
+      "trigram_mean_logfreq",
+      "bigram_unseen_ratio",
+      "dict_coverage",
+      "dict_word_count",
+      "longest_dict_word_ratio",
+      "is_dict_word"
+    ]
+  },
+  "params": {
+    "logreg": {
+      "C": 1.0,
+      "max_iter": 1000,
+      "class_weight": "balanced"
+    },
+    "gb": {
+      "n_estimators": 200,
+      "max_depth": 7,
+      "learning_rate": 0.05
+    }
+  },
+  "cells": {
+    "logreg_basic": {
+      "model": "logreg",
+      "feature_set": "basic",
+      "n_features": 8,
+      "features": [
+        "length",
+        "digit_ratio",
+        "vowel_ratio",
+        "hyphen_count",
+        "entropy",
+        "unique_char_ratio",
+        "longest_consonant_run",
+        "digit_letter_transitions"
+      ],
+      "params": {
+        "C": 1.0,
+        "max_iter": 1000,
+        "class_weight": "balanced"
+      },
+      "metrics": {
+        "f1_seen": 0.7635,
+        "precision_seen": 0.7721,
+        "recall_seen": 0.7552,
+        "f1_future": 0.8414,
+        "recall_future": 0.8003
+      },
+      "per_family_recall": {
+        "test_seen": {
+          "alureon": 0.8467,
+          "bedep": 0.9967,
+          "benign": 0.7761,
+          "ccleaner": 0.8693,
+          "chinad": 1.0,
+          "cryptolocker": 0.9896,
+          "dircrypt": 0.9383,
+          "fobber_v1": 1.0,
+          "fobber_v2": 0.849,
+          "gozi_gpl": 0.9387,
+          "gozi_luther": 0.8993,
+          "gozi_nasa": 0.9288,
+          "gozi_rfc4343": 0.9351,
+          "locky": 0.8407,
+          "pizd": 0.5802,
+          "proslikefan": 0.5736,
+          "pushdo": 0.0,
+          "pykspa": 0.6537,
+          "pykspa_noise": 0.6359,
+          "qadars": 0.9949,
+          "ramdo": 0.9667,
+          "ramnit": 0.8847,
+          "ranbyus_v1": 0.9935,
+          "ranbyus_v2": 1.0,
+          "rovnix": 1.0,
+          "suppobox_1": 0.5561,
+          "suppobox_2": 0.1561,
+          "suppobox_3": 0.9523,
+          "tempedreve": 0.6323,
+          "vawtrak_v1": 0.6267,
+          "vawtrak_v2": 0.0,
+          "vawtrak_v3": 0.0,
+          "zeus-newgoz": 1.0
+        },
+        "test_future": {
+          "banjori": 1.0,
+          "benign": 0.7761,
+          "dyre": 1.0,
+          "matsnu": 0.0587,
+          "murofet_v1": 1.0,
+          "murofet_v2": 0.995,
+          "murofet_v3": 1.0,
+          "necurs": 0.8987,
+          "nymaim": 0.295,
+          "padcrypt": 0.9913,
+          "qakbot": 0.942,
+          "shiotob": 0.9877,
+          "simda": 0.0897,
+          "sisron": 0.97,
+          "tinba": 0.976
+        }
+      }
+    },
+    "logreg_all": {
+      "model": "logreg",
+      "feature_set": "all",
+      "n_features": 15,
+      "features": [
+        "length",
+        "digit_ratio",
+        "vowel_ratio",
+        "hyphen_count",
+        "entropy",
+        "unique_char_ratio",
+        "longest_consonant_run",
+        "digit_letter_transitions",
+        "bigram_mean_logfreq",
+        "trigram_mean_logfreq",
+        "bigram_unseen_ratio",
+        "dict_coverage",
+        "dict_word_count",
+        "longest_dict_word_ratio",
+        "is_dict_word"
+      ],
+      "params": {
+        "C": 1.0,
+        "max_iter": 1000,
+        "class_weight": "balanced"
+      },
+      "metrics": {
+        "f1_seen": 0.8291,
+        "precision_seen": 0.8385,
+        "recall_seen": 0.82,
+        "f1_future": 0.8663,
+        "recall_future": 0.8194
+      },
+      "per_family_recall": {
+        "test_seen": {
+          "alureon": 0.9895,
+          "bedep": 1.0,
+          "benign": 0.8413,
+          "ccleaner": 0.9525,
+          "chinad": 1.0,
+          "cryptolocker": 1.0,
+          "dircrypt": 0.987,
+          "fobber_v1": 1.0,
+          "fobber_v2": 0.9883,
+          "gozi_gpl": 0.8365,
+          "gozi_luther": 0.9403,
+          "gozi_nasa": 0.8576,
+          "gozi_rfc4343": 0.8739,
+          "locky": 0.9561,
+          "pizd": 0.0779,
+          "proslikefan": 0.8264,
+          "pushdo": 0.9195,
+          "pykspa": 0.8862,
+          "pykspa_noise": 0.875,
+          "qadars": 1.0,
+          "ramdo": 1.0,
+          "ramnit": 0.9729,
+          "ranbyus_v1": 1.0,
+          "ranbyus_v2": 1.0,
+          "rovnix": 0.9933,
+          "suppobox_1": 0.082,
+          "suppobox_2": 0.0033,
+          "suppobox_3": 0.8378,
+          "tempedreve": 0.8637,
+          "vawtrak_v1": 0.8613,
+          "vawtrak_v2": 0.4375,
+          "vawtrak_v3": 0.2806,
+          "zeus-newgoz": 1.0
+        },
+        "test_future": {
+          "banjori": 1.0,
+          "benign": 0.8413,
+          "dyre": 1.0,
+          "matsnu": 0.0123,
+          "murofet_v1": 1.0,
+          "murofet_v2": 1.0,
+          "murofet_v3": 1.0,
+          "necurs": 0.9707,
+          "nymaim": 0.126,
+          "padcrypt": 1.0,
+          "qakbot": 0.9903,
+          "shiotob": 0.9977,
+          "simda": 0.3755,
+          "sisron": 1.0,
+          "tinba": 0.9987
+        }
+      }
+    },
+    "gb_basic": {
+      "model": "gb",
+      "feature_set": "basic",
+      "n_features": 8,
+      "features": [
+        "length",
+        "digit_ratio",
+        "vowel_ratio",
+        "hyphen_count",
+        "entropy",
+        "unique_char_ratio",
+        "longest_consonant_run",
+        "digit_letter_transitions"
+      ],
+      "params": {
+        "n_estimators": 200,
+        "max_depth": 7,
+        "learning_rate": 0.05
+      },
+      "metrics": {
+        "f1_seen": 0.7861,
+        "precision_seen": 0.8489,
+        "recall_seen": 0.7319,
+        "f1_future": 0.7797,
+        "recall_future": 0.6771
+      },
+      "per_family_recall": {
+        "test_seen": {
+          "alureon": 0.8746,
+          "bedep": 0.9341,
+          "benign": 0.8692,
+          "ccleaner": 0.9847,
+          "chinad": 0.9983,
+          "cryptolocker": 0.8702,
+          "dircrypt": 0.8994,
+          "fobber_v1": 1.0,
+          "fobber_v2": 0.8725,
+          "gozi_gpl": 0.8058,
+          "gozi_luther": 0.8089,
+          "gozi_nasa": 0.8188,
+          "gozi_rfc4343": 0.8342,
+          "locky": 0.8341,
+          "pizd": 0.2,
+          "proslikefan": 0.6017,
+          "pushdo": 0.3038,
+          "pykspa": 0.652,
+          "pykspa_noise": 0.6266,
+          "qadars": 0.9729,
+          "ramdo": 0.9384,
+          "ramnit": 0.8407,
+          "ranbyus_v1": 0.9232,
+          "ranbyus_v2": 1.0,
+          "rovnix": 0.9882,
+          "suppobox_1": 0.1818,
+          "suppobox_2": 0.0829,
+          "suppobox_3": 0.9936,
+          "tempedreve": 0.6704,
+          "vawtrak_v1": 0.7003,
+          "vawtrak_v2": 0.1667,
+          "vawtrak_v3": 0.1071,
+          "zeus-newgoz": 1.0
+        },
+        "test_future": {
+          "banjori": 1.0,
+          "benign": 0.8692,
+          "dyre": 0.2753,
+          "matsnu": 0.0207,
+          "murofet_v1": 0.9923,
+          "murofet_v2": 0.9407,
+          "murofet_v3": 0.961,
+          "necurs": 0.864,
+          "nymaim": 0.1653,
+          "padcrypt": 0.9937,
+          "qakbot": 0.9217,
+          "shiotob": 0.583,
+          "simda": 0.096,
+          "sisron": 0.7907,
+          "tinba": 0.8743
+        }
+      }
+    },
+    "gb_all": {
+      "model": "gb",
+      "feature_set": "all",
+      "n_features": 15,
+      "features": [
+        "length",
+        "digit_ratio",
+        "vowel_ratio",
+        "hyphen_count",
+        "entropy",
+        "unique_char_ratio",
+        "longest_consonant_run",
+        "digit_letter_transitions",
+        "bigram_mean_logfreq",
+        "trigram_mean_logfreq",
+        "bigram_unseen_ratio",
+        "dict_coverage",
+        "dict_word_count",
+        "longest_dict_word_ratio",
+        "is_dict_word"
+      ],
+      "params": {
+        "n_estimators": 200,
+        "max_depth": 7,
+        "learning_rate": 0.05
+      },
+      "metrics": {
+        "f1_seen": 0.8891,
+        "precision_seen": 0.8929,
+        "recall_seen": 0.8853,
+        "f1_future": 0.8584,
+        "recall_future": 0.7885
+      },
+      "per_family_recall": {
+        "test_seen": {
+          "alureon": 0.9774,
+          "bedep": 0.9934,
+          "benign": 0.8934,
+          "ccleaner": 0.9983,
+          "chinad": 0.9983,
+          "cryptolocker": 0.9965,
+          "dircrypt": 0.987,
+          "fobber_v1": 1.0,
+          "fobber_v2": 0.9832,
+          "gozi_gpl": 0.7308,
+          "gozi_luther": 0.8225,
+          "gozi_nasa": 0.7443,
+          "gozi_rfc4343": 0.8036,
+          "locky": 0.9642,
+          "pizd": 0.6931,
+          "proslikefan": 0.876,
+          "pushdo": 0.913,
+          "pykspa": 0.9015,
+          "pykspa_noise": 0.8703,
+          "qadars": 1.0,
+          "ramdo": 1.0,
+          "ramnit": 0.9831,
+          "ranbyus_v1": 1.0,
+          "ranbyus_v2": 1.0,
+          "rovnix": 0.9663,
+          "suppobox_1": 0.697,
+          "suppobox_2": 0.2228,
+          "suppobox_3": 0.9777,
+          "tempedreve": 0.9113,
+          "vawtrak_v1": 0.9161,
+          "vawtrak_v2": 0.8125,
+          "vawtrak_v3": 0.6054,
+          "zeus-newgoz": 1.0
+        },
+        "test_future": {
+          "banjori": 1.0,
+          "benign": 0.8934,
+          "dyre": 0.646,
+          "matsnu": 0.0494,
+          "murofet_v1": 1.0,
+          "murofet_v2": 0.9987,
+          "murofet_v3": 1.0,
+          "necurs": 0.981,
+          "nymaim": 0.2107,
+          "padcrypt": 0.998,
+          "qakbot": 0.9917,
+          "shiotob": 0.7403,
+          "simda": 0.4315,
+          "sisron": 0.9987,
+          "tinba": 0.9927
+        }
+      }
+    }
+  },
+  "effects": {
+    "headline": {
+      "logreg_basic": {
+        "f1_seen": 0.7635,
+        "recall_future": 0.8003,
+        "dyre_recall": 1.0,
+        "matsnu_recall": 0.0587
+      },
+      "logreg_all": {
+        "f1_seen": 0.8291,
+        "recall_future": 0.8194,
+        "dyre_recall": 1.0,
+        "matsnu_recall": 0.0123
+      },
+      "gb_basic": {
+        "f1_seen": 0.7861,
+        "recall_future": 0.6771,
+        "dyre_recall": 0.2753,
+        "matsnu_recall": 0.0207
+      },
+      "gb_all": {
+        "f1_seen": 0.8891,
+        "recall_future": 0.7885,
+        "dyre_recall": 0.646,
+        "matsnu_recall": 0.0494
+      }
+    },
+    "feature_set_effect_all_minus_basic": {
+      "logreg": {
+        "f1_seen": 0.0656,
+        "recall_future": 0.0191,
+        "dyre_recall": 0.0,
+        "matsnu_recall": -0.0464
+      },
+      "gb": {
+        "f1_seen": 0.103,
+        "recall_future": 0.1114,
+        "dyre_recall": 0.3707,
+        "matsnu_recall": 0.0287
+      }
+    },
+    "model_effect_gb_minus_logreg": {
+      "basic": {
+        "f1_seen": 0.0226,
+        "recall_future": -0.1232,
+        "dyre_recall": -0.7247,
+        "matsnu_recall": -0.038
+      },
+      "all": {
+        "f1_seen": 0.06,
+        "recall_future": -0.0309,
+        "dyre_recall": -0.354,
+        "matsnu_recall": 0.0371
+      }
+    }
+  },
+  "m1_reproduction": {
+    "logreg_basic": {
+      "m1_model": "logreg",
+      "m1_f1_seen": 0.7635,
+      "ablation_f1_seen": 0.7635,
+      "matches_m1": true,
+      "mismatches": []
+    },
+    "gb_all": {
+      "m1_model": "gb",
+      "m1_f1_seen": 0.8891,
+      "ablation_f1_seen": 0.8891,
+      "matches_m1": true,
+      "mismatches": []
+    }
+  },
+  "review_expectations": {
+    "logreg_all": "f1_seen about 0.829",
+    "trees_basic": "dyre recall about 0.89, against about 0.61 for trees on all 15 features"
+  },
+  "notes": [
+    "All four cells are trained on the M1 train split and scored on test_seen and test_future with threshold config.DGA_THRESHOLD; no new parameter search.",
+    "Reruns on the same machine write a byte-identical report. On other machines (other CPUs, BLAS or platforms) gb trees can differ slightly, so reruns match to the report's rounding, not necessarily byte for byte.",
+    "The review's numbers were measured with different settings (HistGradientBoosting with default parameters, possibly other logreg parameters); they are rough expectations, and this report states what this run finds."
+  ]
+}

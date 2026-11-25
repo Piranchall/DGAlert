@@ -1,0 +1,151 @@
+name: Retrain
+
+# One round of the retraining loop (src/retrain.py): phase in the next batch of held-out families,
+# train, and run the promotion gate against the production model.
+# - Real rounds: dispatch by hand on main with dry_run unticked. When the gate promotes, the run
+#   opens the PR "retrain: round <n> (automated)" from retrain/round-<n>, which needs a review.
+# - The weekly schedule is always a dry run: data and training are deterministic, so a real weekly
+#   run would only repeat the same result (a rejected batch is retried unchanged).
+# The MLflow store and the round report are uploaded as an artifact on every run.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: train and gate only, never change models/production/ or open a PR"
+        type: boolean
+        default: true
+  schedule:
+    - cron: "0 3 * * 1" # Mondays 03:00 UTC, always a dry run
+
+permissions:
+  contents: read
+  pull-requests: read # to find an already open PR for the next round
+
+concurrency:
+  group: retrain
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.13"
+  # Real rounds only when dispatched by hand with dry_run unticked; the schedule is always dry.
+  DRY_RUN: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run }}
+  # The PR is opened by the owner of RETRAIN_PR_TOKEN and review is requested from the other one.
+  MEMBERS: "Piranchall hmazhar008"
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Real rounds only on main
+        if: env.DRY_RUN == 'false' && github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::real rounds (dry_run unticked) run only on main"
+          exit 1
+
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false # the PR step pushes with RETRAIN_PR_TOKEN explicitly
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-api.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Skip if this round's PR is already open
+        id: pending
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          round="$(python -c 'import json; p = json.load(open("models/production/latest.json")); print(int(p.get("round", 0)) + 1)')"
+          echo "round=$round" >> "$GITHUB_OUTPUT"
+          open="$(gh pr list --head "retrain/round-$round" --state open --json number --jq 'length')"
+          if [ "$open" != "0" ]; then
+            echo "::notice::the PR for round $round is already open: nothing to do until it is merged or closed"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Prepare data
+        if: steps.pending.outputs.skip != 'true'
+        # The frozen eval report goes to a temp file: the committed reports/eval_frozen.json stays
+        # the reference the gate checks the frozen eval set's hash against.
+        run: |
+          python -m src.prepare_data
+          python -m src.prepare_retrain --eval-report "$RUNNER_TEMP/eval_frozen.json"
+
+      - name: Retrain and run the gate
+        id: retrain
+        if: steps.pending.outputs.skip != 'true'
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            python -m src.retrain --dry-run
+          else
+            python -m src.retrain
+          fi
+
+      - name: Gate report in the job summary
+        if: always() && steps.retrain.outputs.summary != ''
+        env:
+          SUMMARY: ${{ steps.retrain.outputs.summary }}
+        run: cat "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the MLflow store and the round report
+        if: always() && steps.pending.outputs.skip != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: retrain-round-${{ steps.pending.outputs.round }}-run-${{ github.run_id }}
+          path: |
+            mlflow_local/
+            reports/retrain/
+          if-no-files-found: warn
+          retention-days: 90
+
+      # PRs opened with GITHUB_TOKEN do not trigger other workflows, so CI would never run on them
+      # and the ruleset would block the merge: this step uses a fine-grained token (this repo only,
+      # Contents and Pull requests read/write).
+      - name: Open the promotion PR
+        if: steps.retrain.outputs.promoted == 'true' && env.DRY_RUN == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.RETRAIN_PR_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          ROUND: ${{ steps.retrain.outputs.round }}
+          SUMMARY: ${{ steps.retrain.outputs.summary }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::the RETRAIN_PR_TOKEN secret is not set"
+            exit 1
+          fi
+          owner="$(gh api user --jq .login)"
+          case " $MEMBERS " in
+            *" $owner "*) ;;
+            *) echo "::error::RETRAIN_PR_TOKEN belongs to $owner, who is not one of: $MEMBERS"; exit 1 ;;
+          esac
+          reviewer=""
+          for member in $MEMBERS; do
+            if [ "$member" != "$owner" ]; then reviewer="$member"; fi
+          done
+
+          branch="retrain/round-$ROUND"
+          git switch -c "$branch"
+          git add models/production "reports/retrain/round_$ROUND.json" "reports/retrain/round_$ROUND.md" reports/production_model.json
+          git -c user.name="github-actions[bot]" \
+            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -m "retrain: round $ROUND (automated)"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/$branch"
+          gh pr create --base main --head "$branch" \
+            --title "retrain: round $ROUND (automated)" \
+            --body-file "$SUMMARY" \
+            --reviewer "$reviewer"
+          echo "opened the PR for round $ROUND (author $owner, reviewer $reviewer)" >> "$GITHUB_STEP_SUMMARY"

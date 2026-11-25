@@ -38,6 +38,12 @@ Things to know:
 - **A rollback lasts until the next deploy.** The next merge to `main` deploys `main` again. A
   deploy started from the Render dashboard, or a hook call without `imgURL`, deploys the service's
   configured tag `:main`. Both undo a rollback.
+- **Untested: whether a spin-up keeps a rollback.** It is not known whether a free-tier spin-up
+  after a rollback (see [Free tier](#free-tier-cold-starts-and-stats)) keeps the rolled-back image
+  or goes back to `:main`. The rehearsal did not test it. After the service has been idle, check
+  `git_sha` in `/health` before relying on a rollback.
+- **Image tags come from `git_sha`.** The tag of a commit is `sha-` followed by the 7-character
+  `git_sha` that `/health` shows (or `git log` prints): `git_sha` `100d29c` is tag `sha-100d29c`.
 
 ## Normal redeploy
 
@@ -66,11 +72,16 @@ Then watch the run as in [Watching a deploy run](#watching-a-deploy-run).
 Use this when the live version misbehaves (errors, wrong predictions, `unhealthy`) and the
 previous version was fine.
 
-1. **Note what is live now** (you need it to roll forward):
+1. **Note what is live now** (you need it to roll forward). The tag of the live version is `sha-`
+   plus the `git_sha` in `/health`. This saves it as `$noted` and prints it:
 
    ```powershell
    curl.exe -s https://dgalert.onrender.com/health
+   $noted = "sha-" + (curl.exe -s https://dgalert.onrender.com/health | ConvertFrom-Json).git_sha
+   $noted   # must look like sha-<7 hex characters>; if not, write the tag down by hand
    ```
+
+   `$noted` lasts only in this PowerShell window: write it down as well.
 
 2. **Pick the target commit.** Only commits on `main`'s first-parent line have images, and only
    from `50947c7` (S6) onward:
@@ -79,15 +90,16 @@ previous version was fine.
    git log --first-parent --format="%h %ad %s" --date=format:"%Y-%m-%d %H:%M" main
    ```
 
-   Usually the target is the line below the live commit. Optionally, check that its image exists:
-   `docker manifest inspect ghcr.io/piranchall/dgalert:sha-<short>`. It prints JSON if the image
+   Usually the target is the line below the live commit. Its first column is the 7-character
+   commit, called `<target>` below; the tag to deploy is `sha-<target>`. Optionally, check that its
+   image exists: `docker manifest inspect ghcr.io/piranchall/dgalert:sha-<target>`. It prints JSON if the image
    exists and fails with "manifest unknown" if not. You can also open the package page:
    https://github.com/users/Piranchall/packages/container/package/dgalert.
 
-3. **Deploy it**, for example:
+3. **Deploy it.** Replace `<target>` with the commit you picked (keep the `sha-` prefix):
 
    ```powershell
-   gh workflow run deploy.yml -f tag=sha-50947c7
+   gh workflow run deploy.yml -f tag=sha-<target>
    ```
 
    You can also start it from GitHub: Actions → "Deploy to Render" → "Run workflow" → tag.
@@ -95,11 +107,12 @@ previous version was fine.
 4. **Watch the run** ([below](#watching-a-deploy-run)) until it is green. Then confirm:
 
    ```powershell
-   curl.exe -s https://dgalert.onrender.com/health   # git_sha = 50947c7
+   curl.exe -s https://dgalert.onrender.com/health   # git_sha = <target>
    ```
 
-5. **Fix `main`.** The rollback only lasts until the next merge. Revert the bad PR (or merge a fix)
-   before anyone merges anything else:
+5. **Fix `main` (real incidents only; skip this in a rehearsal,** where the roll-forward restores
+   the live service). The rollback only lasts until the next merge. Revert the bad PR (or merge a
+   fix) before anyone merges anything else:
 
    ```powershell
    git switch main; git pull --ff-only
@@ -112,21 +125,27 @@ previous version was fine.
 ## Roll forward
 
 To go back to the newer version after a rollback (for example in a rehearsal, or when the problem
-turned out to be elsewhere), deploy the newer tag the same way:
+turned out to be elsewhere), deploy the tag you noted in step 1 of the rollback. In the same
+PowerShell window:
 
 ```powershell
-gh workflow run deploy.yml -f tag=sha-4e822c5
+$noted   # check it first: sha-<7 hex characters>
+gh workflow run deploy.yml -f tag=$noted
 ```
 
-Watch the run and confirm `git_sha` in `/health`. Any merge to `main` also rolls forward
-automatically to the new `main`.
+In a new window, type the noted tag instead: `gh workflow run deploy.yml -f tag=sha-<noted>`.
+
+Watch the run and confirm that `git_sha` in `/health` is the noted commit (the tag without
+`sha-`). Any merge to `main` also rolls forward automatically to the new `main`.
 
 ## Watching a deploy run
 
 ```powershell
-# The new run takes a few seconds to appear after "gh workflow run".
-gh run list --workflow deploy.yml --limit 3
-$run = gh run list --workflow deploy.yml --limit 1 --json databaseId --jq '.[0].databaseId'
+# The new run takes a few seconds to appear after "gh workflow run": wait first.
+Start-Sleep 10
+# Check that the newest manual run is yours: event workflow_dispatch, started just now.
+gh run list --workflow deploy.yml --event workflow_dispatch --limit 3
+$run = gh run list --workflow deploy.yml --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId'
 gh run watch $run --exit-status
 gh run view $run --log-failed     # only if it failed: shows the failing step's output
 ```
@@ -226,10 +245,34 @@ gh run view <run id> --log-failed
 
 ## Rehearsal record
 
-The rollback and roll-forward rehearsals, and the other member following this RUNBOOK unaided,
-are recorded here after this RUNBOOK is merged (the deploy workflow must be on `main` before it
-can be run by hand).
+Rehearsed on 25 Nov 2026, after the RUNBOOK was merged (`100d29c`, PR #38). Times are PKT
+(UTC+5). Times marked † come from GitHub's run metadata (`gh run view <id> --json
+createdAt,updatedAt,jobs`), not from a note taken during the rehearsal. A deploy run succeeds only
+once `/health` reports the requested commit, so a run's end time is the latest time the commit
+was live.
 
-| # | Who | Action | Tag deployed | Started (PKT) | Live (`git_sha`, time) | Run |
-|---|---|---|---|---|---|---|
-| | | | | | | |
+| # | Who | Action | Tag deployed | Triggered | Run | Deploy job | Live (`git_sha`, time) |
+|---|---|---|---|---|---|---|---|
+| 1 | Hussain | merge deploy of PR #38 (automatic) | `sha-100d29c` | 19:03:41† (merge; CI run created) | CI 45629953710, job `deploy / deploy` | 48 s (19:06:22†–19:07:10†) | `100d29c` by 19:07:10† |
+| 2 | Hussain | rollback | `sha-50947c7` | 19:10:12 | 45631130391 | 48 s | `50947c7` at 19:13:34 |
+| 3 | Hussain | roll forward | `sha-100d29c` | 19:13:54 | 45631793975 | 46 s | `100d29c` at 19:17:45 |
+| 4 | Piranchal (following the RUNBOOK; needed the four clarifications below) | rollback | `sha-4e822c5` | 19:21:40 | 45633205518 | 46 s | `4e822c5` by 19:22:34† |
+| 5 | Piranchal (following the RUNBOOK; needed the four clarifications below) | roll forward | `sha-100d29c` | 19:24:58 | 45633809754 | 52 s | `100d29c` at 19:30:03 |
+
+All five runs succeeded. Each manual deploy (rows 2 to 5) took 53 to 60 seconds from the
+trigger to a green run (run end times from run metadata). The
+"Live" times in rows 2, 3 and 5 are when `/health` was checked by hand after the run, not when the
+new version went live.
+
+Piranchal followed the RUNBOOK as first merged in PR #38 and needed four clarifications, which
+this version now includes:
+
+1. The example tags (`sha-50947c7`, `sha-4e822c5`) read like instructions; they are now
+   placeholders (`sha-<target>`, `$noted`).
+2. It did not say how to turn the `git_sha` from `/health` into a tag (add `sha-`).
+3. "Watching a deploy run" listed the newest run immediately, before the new run appears; it now
+   waits 10 seconds and checks that the run is a `workflow_dispatch` started just now.
+4. "Fix `main`" did not say it is for real incidents only; it now says to skip it in a rehearsal.
+
+**Not tested:** whether a free-tier spin-up after a rollback keeps the rolled-back image (see
+[How deployment works](#how-deployment-works)). The idle spin-down test was not done.

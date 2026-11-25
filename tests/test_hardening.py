@@ -135,6 +135,7 @@ def test_health_degraded_when_explainer_fails(
         "status": "degraded",
         "model_loaded": True,
         "explainer_loaded": False,
+        "git_sha": "unknown",
         "model_version": "test_fixture",
     }
     assert explain.status_code == 503

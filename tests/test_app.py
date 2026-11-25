@@ -23,6 +23,7 @@ def test_health_with_model(client: TestClient) -> None:
         "status": "healthy",
         "model_loaded": True,
         "explainer_loaded": True,
+        "git_sha": "unknown",
         "model_version": "test_fixture",
     }
 
@@ -42,6 +43,7 @@ def test_health_without_model(client_without_model: TestClient) -> None:
         "status": "unhealthy",
         "model_loaded": False,
         "explainer_loaded": False,
+        "git_sha": "unknown",
     }
 
 
@@ -74,6 +76,7 @@ def test_tampered_model_gives_503_and_logs_reason(
         "status": "unhealthy",
         "model_loaded": False,
         "explainer_loaded": False,
+        "git_sha": "unknown",
     }
     assert predict.status_code == 503
     assert "Could not load the model" in caplog.text

@@ -1,0 +1,28 @@
+# Keep the build context small and free of local state; the Dockerfile copies only what it needs.
+
+# Version control, environments and secrets
+.git/
+venv/
+.env
+*.env
+
+# Data that is not needed at runtime (data/reference/ is copied)
+data/raw/
+data/processed/
+
+# MLflow stores and working copies
+mlruns/
+mlflow.db
+mlflow_local/
+mlflow_m1/
+
+# Local model candidates; only the committed production model goes into the image
+models/*
+!models/production/
+
+# Tests and caches
+tests/
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+.ruff_cache/

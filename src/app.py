@@ -5,6 +5,7 @@ Run with: uvicorn src.app:app
 """
 
 import logging
+import os
 import re
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -30,6 +31,10 @@ from src.scope import check_scope
 
 logger = logging.getLogger(__name__)
 access_logger = configure_access_logger()
+
+# The commit the running image was built from (Docker build arg GIT_SHA); identifies a deployment.
+GIT_SHA_ENV_VAR = "GIT_SHA"
+UNKNOWN_GIT_SHA = "unknown"
 
 MAX_DOMAIN_LENGTH = 253
 # Limit on the raw input, checked by Pydantic before normalize_domain runs (C4). A domain is at
@@ -211,6 +216,9 @@ class HealthResponse(BaseModel):
     )
     model_loaded: bool
     explainer_loaded: bool
+    git_sha: str = Field(
+        description='Commit the image was built from (GIT_SHA env var); "unknown" when not set.'
+    )
     model_version: str | None = None
 
     model_config = ConfigDict(
@@ -220,12 +228,14 @@ class HealthResponse(BaseModel):
                     "status": "healthy",
                     "model_loaded": True,
                     "explainer_loaded": True,
+                    "git_sha": "67fc13b",
                     "model_version": "20261105_062411",
                 },
                 {
                     "status": "degraded",
                     "model_loaded": True,
                     "explainer_loaded": False,
+                    "git_sha": "67fc13b",
                     "model_version": "20261105_062411",
                 },
             ]
@@ -312,6 +322,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.metadata = {}
     app.state.explainer = None
     app.state.stats = StatsCollector()  # in memory: counters reset on every start
+    app.state.git_sha = os.environ.get(GIT_SHA_ENV_VAR) or UNKNOWN_GIT_SHA
     try:
         app.state.model, app.state.metadata = load_model()
         logger.info("Loaded model version %s", app.state.metadata["version"])
@@ -474,12 +485,14 @@ def health(request: Request) -> HealthResponse | JSONResponse:
                 "status": "unhealthy",
                 "model_loaded": False,
                 "explainer_loaded": explainer_loaded,
+                "git_sha": request.app.state.git_sha,
             },
         )
     return HealthResponse(
         status="healthy" if explainer_loaded else "degraded",
         model_loaded=True,
         explainer_loaded=explainer_loaded,
+        git_sha=request.app.state.git_sha,
         model_version=str(request.app.state.metadata["version"]),
     )
 

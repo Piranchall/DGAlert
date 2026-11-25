@@ -15,9 +15,10 @@ Fall 2026). Milestone 2 adds automated retraining (KaizenML) as new malware fami
 4. [Results](#results)
 5. [Explainability and the drift story](#explainability-and-the-drift-story)
 6. [API](#api)
-7. [Limitations](#limitations)
-8. [Tests](#tests)
-9. [Citations](#citations)
+7. [Docker](#docker)
+8. [Limitations](#limitations)
+9. [Tests](#tests)
+10. [Citations](#citations)
 
 ## Architecture
 
@@ -456,14 +457,18 @@ curl http://127.0.0.1:8000/health
 ```
 
 ```json
-{"status": "healthy", "model_loaded": true, "explainer_loaded": true, "model_version": "20261105_062411"}
+{"status": "healthy", "model_loaded": true, "explainer_loaded": true, "git_sha": "67fc13b", "model_version": "20261105_062411"}
 ```
+
+`git_sha` is the commit the running image was built from (Docker build arg `GIT_SHA`, see
+[Docker](#docker)), so a deployment can be identified; it is `"unknown"` when not set, e.g. when
+running from a venv.
 
 | `status` | HTTP | When |
 |---|---|---|
 | `healthy` | 200 | model and explainer loaded |
 | `degraded` | 200 | model loaded but the explainer failed: `/predict` works, `/explain` returns 503 |
-| `unhealthy` | 503 | no model (`{"status": "unhealthy", "model_loaded": false, "explainer_loaded": false}`) |
+| `unhealthy` | 503 | no model (`{"status": "unhealthy", "model_loaded": false, "explainer_loaded": false, "git_sha": "..."}`) |
 
 `degraded` stays 200 so that Docker and Render health checks do not restart a service that still
 answers `/predict`; the body and the server log say what failed.
@@ -514,6 +519,35 @@ the label and probability:
 ```json
 {"timestamp": "2026-11-25T09:00:01.234+00:00", "method": "POST", "path": "/predict", "status": 200, "latency_ms": 9.81, "label": "dga", "probability": 0.996}
 ```
+
+## Docker
+
+Build the API image and run it (PowerShell or bash, from the repo root):
+
+```bash
+docker build --build-arg GIT_SHA=$(git rev-parse --short HEAD) -t dgalert:local .
+docker run --rm -p 8000:8000 --name dgalert dgalert:local
+```
+
+On Linux/macOS, `make docker-build` and `make docker-run` do the same. The API is then at
+http://127.0.0.1:8000 (docs at `/docs`), and `docker ps` shows the container as `(healthy)` about
+10 seconds after it starts. Stop it with Ctrl+C or `docker stop dgalert`.
+
+- **Image**: multi-stage build on `python:3.13.18-slim-trixie` (Python 3.13.18, Debian 13), pinned
+  to the exact patch release. The builder installs only `requirements-api.txt` into a venv (no
+  mlflow, pytest or ruff); the runtime stage copies that venv, `src/`, `data/reference/` (the word
+  list the features load) and `models/production/`. About 705 MB unpacked (161 MB compressed).
+- **Runs as a non-root user** (`dgalert`, uid 10001) that cannot modify the code, the model or the
+  installed packages. `NUMBA_CACHE_DIR=/tmp/numba_cache` gives shap's numba a writable cache folder.
+- **Port**: uvicorn listens on `0.0.0.0:${PORT:-8000}`, so a platform that sets `PORT` (Render)
+  works unchanged: `docker run --rm -e PORT=9000 -p 9000:9000 dgalert:local`.
+- **Health check**: Docker calls `/health` with Python's `urllib` (slim images have no curl) every
+  2 seconds while starting and every 10 seconds after. `healthy` and `degraded` (200) pass;
+  `unhealthy` (503) fails. These calls show up in `/stats` and in the log.
+- **Logs**: one JSON line per request on stdout (`docker logs dgalert`); uvicorn's own access
+  line is switched off (`--no-access-log`).
+- **`GIT_SHA`**: the build arg is stored in the image and returned by `/health`, which identifies
+  the deployed commit. Without it the value is `unknown`.
 
 ## Limitations
 
@@ -575,6 +609,7 @@ CI (GitHub Actions, Ubuntu, Python 3.13) runs the same three commands on every p
 | `tests/test_app.py` | `/health` and `/predict`: success, 503 without a model or with a tampered model, every 422 validation rule |
 | `tests/test_monitoring.py` | `/stats` counts per endpoint and status class, latency, label counts matching `/predict`, `unmatched` paths, reset on restart, working without a model; thread-safe counters; one JSON log line per request with no request body |
 | `tests/test_hardening.py` | scope warnings for private suffixes and punycode (C1, C2) and their `/stats` count, `/health` `degraded` when the explainer fails (C3), the 1,024-character input limit checked before normalization (C4), `output_units` per model type (C5), `GET /` redirect (C6) |
+| `tests/test_docker.py` | `GIT_SHA` in `/health` (set, unset, and in the 503 body); static checks of the `Dockerfile` (pinned base image in both stages, only `requirements-api.txt`, non-root user, health check, port, command) and `.dockerignore` |
 | `tests/test_explain.py` | `/explain` shape and agreement with `/predict`; SHAP additivity for gb, rf and the logreg fallback |
 | `tests/test_hyphen_evasion.py` | hyphen insertion in `scripts/hyphen_evasion.py` keeps the suffix and splits the label in the middle |
 

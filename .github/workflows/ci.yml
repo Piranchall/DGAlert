@@ -1,20 +1,57 @@
 name: CI
 
+# Three jobs, whose IDs are the required status checks: lint, test, build.
+# build smoke-tests the Docker image on every run and publishes it to GHCR only on pushes to main
+# and v* tags (never from pull requests).
+
 on:
   push:
     branches: [main]
     tags: ["v*"]
   pull_request:
 
+# One run per PR or branch; a newer push to a PR cancels the older run. Runs on main and tags are
+# never cancelled, so a publish is not cut off halfway.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/piranchall/dgalert # GHCR names must be lowercase
+  PYTHON_VERSION: "3.13"
+
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install ruff (version pinned in requirements.txt)
+        run: pip install "$(grep '^ruff==' requirements.txt)"
+
+      - name: Ruff lint
+        run: ruff check src tests scripts
+
+      - name: Ruff format check
+        run: ruff format --check src tests scripts
+
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
-          python-version: "3.13"
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
           cache-dependency-path: |
             requirements.txt
@@ -25,11 +62,89 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Ruff lint
-        run: ruff check src tests scripts
-
-      - name: Ruff format check
-        run: ruff format --check src tests scripts
-
       - name: Pytest
         run: pytest -q
+
+  build:
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # push to GHCR (only used on main and v* tags)
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Short commit SHA
+        id: sha
+        run: echo "short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true # into the local Docker daemon, to run and test it below
+          tags: dgalert:ci
+          build-args: GIT_SHA=${{ steps.sha.outputs.short }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Start container and wait until healthy
+        run: |
+          docker run -d --name dgalert-ci -p 8000:8000 dgalert:ci
+          for attempt in $(seq 1 45); do
+            status="$(docker inspect --format '{{.State.Health.Status}}' dgalert-ci)"
+            echo "attempt $attempt: $status"
+            if [ "$status" = "healthy" ]; then exit 0; fi
+            if [ "$status" = "unhealthy" ]; then break; fi
+            sleep 2
+          done
+          echo "::error::container not healthy (last status: $status)"
+          docker inspect --format '{{json .State.Health}}' dgalert-ci
+          docker logs dgalert-ci
+          exit 1
+
+      - name: Smoke test /health and /predict
+        env:
+          EXPECTED_SHA: ${{ steps.sha.outputs.short }}
+        run: |
+          health="$(curl -sf http://127.0.0.1:8000/health)"
+          echo "$health"
+          python3 -c 'import json, os, sys; h = json.loads(sys.argv[1]); assert h["git_sha"] == os.environ["EXPECTED_SHA"], h' "$health"
+
+          predict="$(curl -sf -X POST http://127.0.0.1:8000/predict \
+            -H 'Content-Type: application/json' -d '{"domain": "moiqidfvjjhjmndqp.in"}')"
+          echo "$predict"
+          python3 -c 'import json, sys; p = json.loads(sys.argv[1]); assert p["label"] == "dga", p' "$predict"
+
+      - name: Container logs
+        if: always()
+        run: docker logs dgalert-ci || true
+
+      - name: Stop container
+        if: always()
+        run: docker rm -f dgalert-ci || true
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push the tested image to GHCR
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        env:
+          SHORT_SHA: ${{ steps.sha.outputs.short }}
+        run: |
+          tags="$IMAGE:sha-$SHORT_SHA"
+          if [ "$GITHUB_REF" = "refs/heads/main" ]; then tags="$tags $IMAGE:main"; fi
+          case "$GITHUB_REF" in refs/tags/v*) tags="$tags $IMAGE:$GITHUB_REF_NAME" ;; esac
+          for tag in $tags; do
+            docker tag dgalert:ci "$tag"
+            docker push "$tag"
+            echo "pushed $tag" >> "$GITHUB_STEP_SUMMARY"
+          done

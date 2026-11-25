@@ -596,7 +596,25 @@ venv\Scripts\ruff check src tests scripts
 venv\Scripts\ruff format --check src tests scripts
 ```
 
-CI (GitHub Actions, Ubuntu, Python 3.13) runs the same three commands on every push and pull request.
+### CI
+
+GitHub Actions (`.github/workflows/ci.yml`, Ubuntu, Python 3.13) runs on every pull request, on
+pushes to `main` and on `v*` tags, as three jobs that are also the required status checks:
+
+| Job | What it does |
+|---|---|
+| `lint` | `ruff check` and `ruff format --check` (installs only the ruff version pinned in `requirements.txt`) |
+| `test` | `pytest -q` with `requirements.txt`, including the sanity tests on the production model |
+| `build` | after `lint` and `test` pass: builds the Docker image with `GIT_SHA`, waits until Docker reports it healthy, checks that `/health` shows that commit and that `/predict` labels `moiqidfvjjhjmndqp.in` as `dga`, then stops it |
+
+On pushes to `main` and `v*` tags only, `build` then pushes **the image it just tested** to the
+GitHub Container Registry as `ghcr.io/piranchall/dgalert:sha-<short sha>`, plus `:main` or the
+version tag (e.g. `:v2.0-milestone2`). Pull requests never push. To run a published image:
+
+```bash
+docker pull ghcr.io/piranchall/dgalert:main
+docker run --rm -p 8000:8000 ghcr.io/piranchall/dgalert:main
+```
 
 | File | Covers |
 |---|---|
@@ -609,6 +627,7 @@ CI (GitHub Actions, Ubuntu, Python 3.13) runs the same three commands on every p
 | `tests/test_app.py` | `/health` and `/predict`: success, 503 without a model or with a tampered model, every 422 validation rule |
 | `tests/test_monitoring.py` | `/stats` counts per endpoint and status class, latency, label counts matching `/predict`, `unmatched` paths, reset on restart, working without a model; thread-safe counters; one JSON log line per request with no request body |
 | `tests/test_hardening.py` | scope warnings for private suffixes and punycode (C1, C2) and their `/stats` count, `/health` `degraded` when the explainer fails (C3), the 1,024-character input limit checked before normalization (C4), `output_units` per model type (C5), `GET /` redirect (C6) |
+| `tests/test_ci.py` | the CI workflow: jobs `lint`, `test`, `build` (build after the other two), triggers, pinned ruff, `packages: write` only for `build`, publishing only on pushes to `main` and `v*` tags, lowercase image name, smoke test with a timeout |
 | `tests/test_docker.py` | `GIT_SHA` in `/health` (set, unset, and in the 503 body); static checks of the `Dockerfile` (pinned base image in both stages, only `requirements-api.txt`, non-root user, health check, port, command) and `.dockerignore` |
 | `tests/test_explain.py` | `/explain` shape and agreement with `/predict`; SHAP additivity for gb, rf and the logreg fallback |
 | `tests/test_hyphen_evasion.py` | hyphen insertion in `scripts/hyphen_evasion.py` keeps the suffix and splits the label in the middle |

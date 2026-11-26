@@ -25,6 +25,7 @@ Decisions already taken: Python **3.13** stays (our decision: the pinned numpy 2
 | S11 | Retraining loop | `feat/retrain-loop` | Hussain | S2, S6, S10 | Proposal promise |
 | S12 | Feature-set ablation | `feat/ablation` | Hussain | S2 | Nice to have |
 | S13 | M2 documentation | `docs/m2-docs` | Hussain (both write their own reflections) | all | M2 required |
+| S14 | Threshold-free metrics (ROC-AUC, PR-AUC) | `feat/roc-auc` | Piranchal | S2, S10, S11 | M1 review feedback |
 
 **Cut line if behind on Friday:** S12 moves to the final phase, and S11 ships as a dry run (gate
 decision and report, no automatic PR). The course allows the focus area to be "in progress" at M2.
@@ -320,6 +321,33 @@ D3 undocumented proposal deviations, D4 UMUDGA citation venue, D6 group-of-two n
 **Acceptance**
 - The other member follows the README from a clean clone to a running container and a live call
   without help.
+
+## S14: Threshold-free metrics (M1 review feedback)
+
+Added after S13. The M1 review said: "Concept drift findings were well established. Predictions on
+unseen data were based on seen families. Recommendation: use ROC-AUC, especially for evaluating on
+unseen data."
+
+**Do**
+- `src/metrics.py`: ROC-AUC and PR-AUC (average precision) from P(dga); per family, the family's
+  DGA rows against all benign rows of the same set, with the PR-AUC baseline.
+- `python -m src.report --auc` writes `reports/m1_auc.json`: the three M1 models on `test_seen` and
+  `test_future`, and per held-out family.
+  - gb comes from `models/production/` (SHA-256 checked). logreg and rf come from the local M1
+    files, each verified by recomputing its M1 threshold metrics, with its SHA-256 recorded.
+  - Local only (needs `data/processed/` and the M1 files). `m1_results.json` and the M1 snapshot
+    test are unchanged.
+- Gate and round reports: ROC-AUC and PR-AUC for champion and challenger (overall, new families,
+  earlier families) as reported values only, not a criterion. Round 1's values are recomputed with
+  a dry run; `reports/retrain/round_1_rejected.json` is not edited.
+- README: "Response to Milestone 1 feedback", with the review quoted, why recall at a threshold
+  fixed on seen families mixes ranking and threshold effects on unseen families, the AUC tables,
+  and which families are a threshold problem and which are ranked as benign.
+- Tests: the metrics on a hand-computed example, the per-family computation, determinism.
+
+**Acceptance**
+- Deterministic `reports/m1_auc.json`; each model verified against M1 before its AUCs are written;
+  gate decisions unchanged (still six criteria).
 
 ---
 

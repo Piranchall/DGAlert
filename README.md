@@ -219,6 +219,7 @@ venv\Scripts\mlflow ui --backend-store-uri sqlite:///mlflow_local/mlflow.db   # 
 
 venv\Scripts\python -m src.m1_snapshot             # copy of the M1 runs; prints its `mlflow ui` command
 venv\Scripts\python -m src.report                  # rebuilds reports/ (needs data/processed/)
+venv\Scripts\python -m src.report --auc            # reports/m1_auc.json (local only: needs the M1 model files)
 ```
 
 macOS / Linux (bash, from the repo root; `python3.13` must be on the PATH):
@@ -239,6 +240,7 @@ venv/bin/mlflow ui --backend-store-uri sqlite:///mlflow_local/mlflow.db   # your
 
 venv/bin/python -m src.m1_snapshot              # copy of the M1 runs; prints its `mlflow ui` command
 venv/bin/python -m src.report                   # rebuilds reports/ (needs data/processed/)
+venv/bin/python -m src.report --auc             # reports/m1_auc.json (local only: needs the M1 model files)
 ```
 
 Training takes about 11 minutes. Most of it is the gradient boosting model: about 6 minutes of grid
@@ -459,7 +461,9 @@ All six are always evaluated, so a rejection lists every failed criterion. The d
 `promote`, `failed`, one entry per criterion (champion and challenger values, delta, threshold,
 message), and both models' metrics side by side: overall precision, recall and F1, seen F1,
 new-family and earlier-family recall, false-positive rate, recall per family, and the sanity
-labels. `src/train.py`'s `promote_if_better` (higher stored `f1_seen`) stays for reproducing
+labels. It also reports ROC-AUC and PR-AUC (overall, new families and earlier families, each
+against all benign rows) for both models. These are **not criteria**; see
+[threshold-free metrics](#response-to-milestone-1-feedback-threshold-free-metrics). `src/train.py`'s `promote_if_better` (higher stored `f1_seen`) stays for reproducing
 Milestone 1 only.
 
 ### Retraining loop (Milestone 2)
@@ -480,7 +484,7 @@ lets the gate decide.
      0.1, 200 iterations, 63 leaves, F1 0.8894.
 3. **Gate.** Run the promotion gate against the production model on the frozen eval set.
 4. **Log.** Record the run in MLflow (experiment `dgalert-m2-kaizen`): parameters, both models'
-   gate metrics, and the decision as an artifact.
+   gate metrics (including the reported ROC-AUC and PR-AUC), and the decision as an artifact.
 5. **Report.** Always write `reports/retrain/round_<n>.json` and `round_<n>.md` (the gate report).
 6. **On promotion** (not with `--dry-run`):
    - save the new model in `models/production/` and delete the old model file;
@@ -559,6 +563,103 @@ F1 depends on precision, and precision rises when positives are more common. Wit
 in `test_future`, every model's precision there is inflated. That is why `f1_future` is *higher*
 than `f1_seen` for logreg even though it misses whole families. **Compare recall instead:** gb
 catches 0.8853 of DGA domains from families it has seen but only 0.7885 from families it has not.
+
+### Response to Milestone 1 feedback: threshold-free metrics
+
+The Milestone 1 review said:
+
+> "Concept drift findings were well established. Predictions on unseen data were based on seen
+> families. Recommendation: use ROC-AUC, especially for evaluating on unseen data."
+
+**Why recall alone mixes two effects on unseen families.** Every number above uses one threshold,
+P(dga) ≥ 0.5, and that cut-off fits the score distribution of the families the model trained on.
+On an unseen family a low recall can mean two different things:
+
+- **the model ranks the family as benign:** its domains score no higher than real benign
+  domains, so no threshold separates them;
+- **the model ranks it correctly, but below 0.5:** the scores are above most benign domains, and a
+  different threshold would catch it.
+
+**ROC-AUC tells the two apart.** It measures how well P(dga) ranks DGA domains above benign ones
+at every threshold: 1.0 is a perfect ranking, 0.5 is random, and below 0.5 is a ranking the wrong
+way round. It also does not depend on the class balance, which inflates F1 and PR-AUC on
+`test_future` (68.7% DGA). PR-AUC (average precision) is reported next to it. Its baseline is the
+share of DGA rows: 0.5011 on `test_seen` and 0.6869 on `test_future`.
+
+**Overall, on the M1 models:**
+
+| Model | ROC-AUC seen | ROC-AUC unseen | PR-AUC seen | PR-AUC unseen |
+|---|---|---|---|---|
+| logreg (8 basic features) | 0.8648 | 0.8363 | 0.8758 | 0.9373 |
+| rf | 0.9582 | 0.8779 | 0.9574 | 0.9459 |
+| **gb** | **0.9634** | **0.8721** | **0.9645** | **0.9512** |
+
+- **The drift shows without a threshold too.** gb's ROC-AUC drops from 0.9634 on seen families to
+  0.8721 on unseen ones.
+- **On unseen families, gb is not the best ranker.** rf ranks them slightly better (0.8779). gb
+  was chosen on `f1_seen`, the metric declared in advance (see [Why gb](#why-gb)).
+
+**Per held-out family (gb).** Each family's DGA rows are scored against all 19,144 benign rows of
+`test_future`. A family is 13.5% of those rows, so a random ranking has a PR-AUC of about 0.135.
+
+| Family | ROC-AUC | PR-AUC | Recall at 0.5 |
+|---|---|---|---|
+| matsnu | **0.1868** | 0.0810 | 0.0494 |
+| nymaim | **0.5185** | 0.1624 | 0.2107 |
+| simda | 0.7369 | 0.3820 | 0.4315 |
+| dyre | 0.8929 | 0.4754 | 0.6460 |
+| shiotob | 0.9180 | 0.7973 | 0.7403 |
+| banjori | 0.9825 | 0.7974 | 1.0 |
+| the other 8 | 0.9914 to 0.9997 | 0.9537 to 0.9978 | 0.981 to 1.0 |
+
+What this shows:
+
+- **matsnu and nymaim are ranked as benign, not cut at the wrong place.**
+  - matsnu's ROC-AUC of 0.1868 is far below random: gb scores matsnu domains as *more* benign
+    than real benign domains. This is the hyphen shortcut from
+    [the drift story](#matsnu-hyphen--english-words--benign). logreg (0.1235) and rf (0.2972) do
+    the same.
+  - nymaim (0.5185) is ranked at about random.
+  - **No threshold fixes either family.** They need training data or different features, which is
+    why matsnu is the first [phase-in batch](#retraining-data-milestone-2) and nymaim is in the
+    second.
+- **dyre and shiotob are partly a threshold problem.** Their ROC-AUC is about 0.9 while recall at
+  0.5 is 0.646 and 0.7403, so many of their domains score above most benign ones but below 0.5.
+  simda (0.7369 against 0.4315) is in between. No family has a high ROC-AUC together with a really
+  low recall.
+- **The other nine held-out families are ranked almost perfectly** (ROC-AUC 0.9825 or more) and
+  already caught at 0.5.
+
+The numbers come from `reports/m1_auc.json`, which also has the same table for logreg and rf. It is
+written by `python -m src.report --auc` and **regenerated locally, not in CI**: it needs
+`data/processed/` and the M1 model files.
+
+- **gb** is read from `models/production/` (committed, SHA-256 checked).
+- **logreg and rf** are read from the gitignored M1 files in `models/`, which exist only where M1
+  was trained.
+- **Each model is checked first:** its recall, precision and F1 are recomputed and must equal
+  `reports/m1_results.json` before its AUCs are written. The file records each model's SHA-256.
+- **In CI**, a test checks the committed file against the other committed reports: per-family
+  recall equal to `per_family_recall.json`, and row counts.
+- **`m1_results.json` and the M1 snapshot are unchanged.**
+
+**In the retraining loop.** The promotion gate now also reports ROC-AUC and PR-AUC for both models
+(overall, the new families and the earlier families, each against all benign rows). They are
+**reported, not gated:** the six criteria are unchanged. For round 1, recomputed with
+`python -m src.retrain --dry-run` (the six criteria reproduced exactly as in the committed
+[`round_1_rejected.json`](reports/retrain/round_1_rejected.json)):
+
+| Rows (frozen eval set) | Champion ROC-AUC | Challenger ROC-AUC | Champion PR-AUC | Challenger PR-AUC |
+|---|---|---|---|---|
+| all rows | 0.9360 | 0.9534 | 0.9623 | 0.9692 |
+| matsnu against benign | 0.1876 | 0.9298 | 0.0174 | 0.2060 |
+
+- **Retraining fixes matsnu's ranking.** The challenger's ROC-AUC on matsnu rises from 0.1876
+  to 0.9298.
+- **But its PR-AUC stays low:** 0.2060, against a baseline of 0.0298 (589 matsnu rows among 19,144
+  benign). Among the domains it scores highest, many are benign. That is the same false-positive
+  problem the gate rejected it for, seen without a threshold.
+- `round_1_rejected.json` is unchanged: it records what the gate saw at the time.
 
 ### Why gb
 
@@ -1130,7 +1231,8 @@ docker run --rm -p 8000:8000 ghcr.io/piranchall/dgalert:main
 | `tests/test_config.py` | paths inside the repo, local MLflow store and its env-var overrides, working folders gitignored, seed, family lists disjoint |
 | `tests/test_features.py` | normalization, second-level label extraction, every feature, dictionary split |
 | `tests/test_prepare_data.py` | validation drops, grouped split with no shared labels, held-out families only in test_future, identical output on a rerun |
-| `tests/test_gate.py` | promote; reject on each of the six criteria alone; several failures all listed; inclusive boundaries; earlier-family criterion passes with no earlier families and catches a collapse that seen F1 misses; stored metrics ignored; committed hash used by default; configuration errors raise; deterministic JSON; end to end with two small real models on `data/sample` |
+| `tests/test_metrics.py` | ROC-AUC and PR-AUC on hand-computed examples (including perfect, inverted and single-class), one family's DGA rows against all benign rows, the PR-AUC baseline and recall per family; the M1 AUC report: every model, test set and held-out family, rounded and deterministic, a model whose recomputed metrics differ from M1 refused, model files from the pointer and M1's paths (retrained production, tampered gb and missing files refused); the committed `reports/m1_auc.json` agrees with `per_family_recall.json` and `m1_results.json` |
+| `tests/test_gate.py` | ROC-AUC / PR-AUC reported for both models (a hand-computed value) but never a criterion, even at AUC 0; promote; reject on each of the six criteria alone; several failures all listed; inclusive boundaries; earlier-family criterion passes with no earlier families and catches a collapse that seen F1 misses; stored metrics ignored; committed hash used by default; configuration errors raise; deterministic JSON; end to end with two small real models on `data/sample` |
 | `tests/test_prepare_retrain.py` | hash rule and content-hash format, parts cover the inputs, no label shared between any two parts, about 10% / 20% per family, output independent of row order, membership stable when rows or families are added, one label stays on one side, phase-in batches; on the committed sample: M1 split counts unchanged, frozen eval report equal to the committed one, same hash on a second run |
 | `tests/test_train.py` | training on a tiny fixture, MLflow runs, `latest.json` promotion (with `sha256`) and `--force`, report generation, training refuses the committed store and never writes `reports/`, `production_model.json` lookup across stores (deterministic, no paths or times) |
 | `tests/test_m1_snapshot.py` | the committed `mlflow.db` hash and `mlruns/` unchanged after the viewer command, the copy relocated and refreshed, a changed snapshot refused, `reports/` rebuilt from the snapshot equal to the committed files (parsed JSON); `reports/production_model.json` matches the production pointer (rebuilt from the snapshot while production is the M1 model) |

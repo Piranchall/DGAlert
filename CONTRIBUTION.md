@@ -117,4 +117,6 @@ domains are missed was the most useful moment of the milestone.
 
 #### Muhammad Hussain
 
+
 #### Piranchal Mukesh
+I built the Milestone 2 baseline: the production model committed with a SHA-256 check, /stats and the API fixes, the Docker image, the three CI jobs that publish it to GHCR, and the Render deployment, which waits until the live /health reports the merged commit. The thing I’ll remember is that production should run the exact image CI tested, and that this has to be checked on every deploy, which is why each one is verified through git_sha. Our process needed the same checking. We thought main was protected when it wasn’t, and two PRs were merged without review before I set up the ruleset.

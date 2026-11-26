@@ -1,0 +1,356 @@
+{
+  "positive_class": "dga",
+  "threshold": 0.5,
+  "metrics": "roc_auc and pr_auc (average precision) from P(dga); recall at threshold",
+  "per_family_rows": "the family's DGA rows against all benign rows of test_future",
+  "rows": {
+    "test_seen": 38373,
+    "test_future": 61141
+  },
+  "models": {
+    "logreg": {
+      "file": "models/model_20261105_061331.joblib",
+      "sha256": "ac1d45cc1527565190c3b9d33790b9afd50bd45e3f4b09738f71872ef8379b4c",
+      "threshold_metrics_match_m1": true,
+      "test_seen": {
+        "roc_auc": 0.8648,
+        "pr_auc": 0.8758
+      },
+      "test_future": {
+        "roc_auc": 0.8363,
+        "pr_auc": 0.9373
+      },
+      "held_out_families": {
+        "banjori": {
+          "roc_auc": 0.9784,
+          "pr_auc": 0.8176,
+          "pr_auc_baseline": 0.1355,
+          "recall": 1.0,
+          "positives": 3000
+        },
+        "dyre": {
+          "roc_auc": 1.0,
+          "pr_auc": 0.9997,
+          "pr_auc_baseline": 0.1355,
+          "recall": 1.0,
+          "positives": 3000
+        },
+        "matsnu": {
+          "roc_auc": 0.1235,
+          "pr_auc": 0.0763,
+          "pr_auc_baseline": 0.1354,
+          "recall": 0.0587,
+          "positives": 2998
+        },
+        "murofet_v1": {
+          "roc_auc": 0.9993,
+          "pr_auc": 0.9946,
+          "pr_auc_baseline": 0.1355,
+          "recall": 1.0,
+          "positives": 3000
+        },
+        "murofet_v2": {
+          "roc_auc": 0.987,
+          "pr_auc": 0.934,
+          "pr_auc_baseline": 0.1355,
+          "recall": 0.995,
+          "positives": 3000
+        },
+        "murofet_v3": {
+          "roc_auc": 1.0,
+          "pr_auc": 0.9999,
+          "pr_auc_baseline": 0.1355,
+          "recall": 1.0,
+          "positives": 3000
+        },
+        "necurs": {
+          "roc_auc": 0.9366,
+          "pr_auc": 0.8139,
+          "pr_auc_baseline": 0.1355,
+          "recall": 0.8987,
+          "positives": 3000
+        },
+        "nymaim": {
+          "roc_auc": 0.4369,
+          "pr_auc": 0.1407,
+          "pr_auc_baseline": 0.1355,
+          "recall": 0.295,
+          "positives": 3000
+        },
+        "padcrypt": {
+          "roc_auc": 0.9759,
+          "pr_auc": 0.874,
+          "pr_auc_baseline": 0.1355,
+          "recall": 0.9913,
+          "positives": 3000
+        },
+        "qakbot": {
+          "roc_auc": 0.9641,
+          "pr_auc": 0.89,
+          "pr_auc_baseline": 0.1355,
+          "recall": 0.942,
+          "positives": 3000
+        },
+        "shiotob": {
+          "roc_auc": 0.9803,
+          "pr_auc": 0.8945,
+          "pr_auc_baseline": 0.1355,
+          "recall": 0.9877,
+          "positives": 3000
+        },
+        "simda": {
+          "roc_auc": 0.4139,
+          "pr_auc": 0.1148,
+          "pr_auc_baseline": 0.1354,
+          "recall": 0.0897,
+          "positives": 2999
+        },
+        "sisron": {
+          "roc_auc": 0.9473,
+          "pr_auc": 0.7232,
+          "pr_auc_baseline": 0.1355,
+          "recall": 0.97,
+          "positives": 3000
+        },
+        "tinba": {
+          "roc_auc": 0.965,
+          "pr_auc": 0.8448,
+          "pr_auc_baseline": 0.1355,
+          "recall": 0.976,
+          "positives": 3000
+        }
+      }
+    },
+    "rf": {
+      "file": "models/model_20261105_061343.joblib",
+      "sha256": "d1842aff0e824f456c1d284408cd049039b71d38dfd8f1a22318f991252c8cee",
+      "threshold_metrics_match_m1": true,
+      "test_seen": {
+        "roc_auc": 0.9582,
+        "pr_auc": 0.9574
+      },
+      "test_future": {
+        "roc_auc": 0.8779,
+        "pr_auc": 0.9459
+      },
+      "held_out_families": {
+        "banjori": {
+          "roc_auc": 0.9694,
+          "pr_auc": 0.7196,
+          "pr_auc_baseline": 0.1355,
+          "recall": 0.9967,
+          "positives": 3000
+        },
+        "dyre": {
+          "roc_auc": 0.8981,
+          "pr_auc": 0.401,
+          "pr_auc_baseline": 0.1355,
+          "recall": 0.641,
+          "positives": 3000
+        },
+        "matsnu": {
+          "roc_auc": 0.2972,
+          "pr_auc": 0.112,
+          "pr_auc_baseline": 0.1354,
+          "recall": 0.0457,
+          "positives": 2998
+        },
+        "murofet_v1": {
+          "roc_auc": 0.995,
+          "pr_auc": 0.9422,
+          "pr_auc_baseline": 0.1355,
+          "recall": 0.9997,
+          "positives": 3000
+        },
+        "murofet_v2": {
+          "roc_auc": 0.997,
+          "pr_auc": 0.9758,
+          "pr_auc_baseline": 0.1355,
+          "recall": 0.9973,
+          "positives": 3000
+        },
+        "murofet_v3": {
+          "roc_auc": 0.9815,
+          "pr_auc": 0.783,
+          "pr_auc_baseline": 0.1355,
+          "recall": 1.0,
+          "positives": 3000
+        },
+        "necurs": {
+          "roc_auc": 0.9878,
+          "pr_auc": 0.9377,
+          "pr_auc_baseline": 0.1355,
+          "recall": 0.9793,
+          "positives": 3000
+        },
+        "nymaim": {
+          "roc_auc": 0.5509,
+          "pr_auc": 0.1621,
+          "pr_auc_baseline": 0.1355,
+          "recall": 0.2097,
+          "positives": 3000
+        },
+        "padcrypt": {
+          "roc_auc": 0.9916,
+          "pr_auc": 0.9371,
+          "pr_auc_baseline": 0.1355,
+          "recall": 0.9953,
+          "positives": 3000
+        },
+        "qakbot": {
+          "roc_auc": 0.9927,
+          "pr_auc": 0.9526,
+          "pr_auc_baseline": 0.1355,
+          "recall": 0.9883,
+          "positives": 3000
+        },
+        "shiotob": {
+          "roc_auc": 0.9149,
+          "pr_auc": 0.7093,
+          "pr_auc_baseline": 0.1355,
+          "recall": 0.713,
+          "positives": 3000
+        },
+        "simda": {
+          "roc_auc": 0.7253,
+          "pr_auc": 0.3709,
+          "pr_auc_baseline": 0.1354,
+          "recall": 0.4562,
+          "positives": 2999
+        },
+        "sisron": {
+          "roc_auc": 0.9963,
+          "pr_auc": 0.9623,
+          "pr_auc_baseline": 0.1355,
+          "recall": 0.9993,
+          "positives": 3000
+        },
+        "tinba": {
+          "roc_auc": 0.9925,
+          "pr_auc": 0.9469,
+          "pr_auc_baseline": 0.1355,
+          "recall": 0.9913,
+          "positives": 3000
+        }
+      }
+    },
+    "gb": {
+      "file": "models/production/model_20261105_062411.joblib",
+      "sha256": "140989615550baed7e883885e0bfe3fd3b855b79e11bc70ff2d9f3d9f3a11b47",
+      "threshold_metrics_match_m1": true,
+      "test_seen": {
+        "roc_auc": 0.9634,
+        "pr_auc": 0.9645
+      },
+      "test_future": {
+        "roc_auc": 0.8721,
+        "pr_auc": 0.9512
+      },
+      "held_out_families": {
+        "banjori": {
+          "roc_auc": 0.9825,
+          "pr_auc": 0.7974,
+          "pr_auc_baseline": 0.1355,
+          "recall": 1.0,
+          "positives": 3000
+        },
+        "dyre": {
+          "roc_auc": 0.8929,
+          "pr_auc": 0.4754,
+          "pr_auc_baseline": 0.1355,
+          "recall": 0.646,
+          "positives": 3000
+        },
+        "matsnu": {
+          "roc_auc": 0.1868,
+          "pr_auc": 0.081,
+          "pr_auc_baseline": 0.1354,
+          "recall": 0.0494,
+          "positives": 2998
+        },
+        "murofet_v1": {
+          "roc_auc": 0.9997,
+          "pr_auc": 0.9978,
+          "pr_auc_baseline": 0.1355,
+          "recall": 1.0,
+          "positives": 3000
+        },
+        "murofet_v2": {
+          "roc_auc": 0.9989,
+          "pr_auc": 0.9938,
+          "pr_auc_baseline": 0.1355,
+          "recall": 0.9987,
+          "positives": 3000
+        },
+        "murofet_v3": {
+          "roc_auc": 0.997,
+          "pr_auc": 0.9537,
+          "pr_auc_baseline": 0.1355,
+          "recall": 1.0,
+          "positives": 3000
+        },
+        "necurs": {
+          "roc_auc": 0.9914,
+          "pr_auc": 0.9648,
+          "pr_auc_baseline": 0.1355,
+          "recall": 0.981,
+          "positives": 3000
+        },
+        "nymaim": {
+          "roc_auc": 0.5185,
+          "pr_auc": 0.1624,
+          "pr_auc_baseline": 0.1355,
+          "recall": 0.2107,
+          "positives": 3000
+        },
+        "padcrypt": {
+          "roc_auc": 0.9958,
+          "pr_auc": 0.974,
+          "pr_auc_baseline": 0.1355,
+          "recall": 0.998,
+          "positives": 3000
+        },
+        "qakbot": {
+          "roc_auc": 0.9962,
+          "pr_auc": 0.9832,
+          "pr_auc_baseline": 0.1355,
+          "recall": 0.9917,
+          "positives": 3000
+        },
+        "shiotob": {
+          "roc_auc": 0.918,
+          "pr_auc": 0.7973,
+          "pr_auc_baseline": 0.1355,
+          "recall": 0.7403,
+          "positives": 3000
+        },
+        "simda": {
+          "roc_auc": 0.7369,
+          "pr_auc": 0.382,
+          "pr_auc_baseline": 0.1354,
+          "recall": 0.4315,
+          "positives": 2999
+        },
+        "sisron": {
+          "roc_auc": 0.9984,
+          "pr_auc": 0.9803,
+          "pr_auc_baseline": 0.1355,
+          "recall": 0.9987,
+          "positives": 3000
+        },
+        "tinba": {
+          "roc_auc": 0.9964,
+          "pr_auc": 0.9763,
+          "pr_auc_baseline": 0.1355,
+          "recall": 0.9927,
+          "positives": 3000
+        }
+      }
+    }
+  },
+  "notes": [
+    "Regenerated locally with python -m src.report --auc: it needs data/processed/ and the M1 model files, so CI does not rebuild it.",
+    "Each model's threshold metrics were recomputed and equal reports/m1_results.json before its AUCs were computed.",
+    "pr_auc_baseline is the family's share of the rows scored (the PR-AUC of a random ranking); per-family PR-AUC is not comparable with the overall one."
+  ]
+}

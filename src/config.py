@@ -111,6 +111,8 @@ REPORTS_DIR: Path = ROOT_DIR / "reports"
 RESULTS_REPORT_PATH: Path = REPORTS_DIR / "m1_results.json"
 PER_FAMILY_REPORT_PATH: Path = REPORTS_DIR / "per_family_recall.json"
 PRODUCTION_REPORT_PATH: Path = REPORTS_DIR / "production_model.json"
+# ROC-AUC / PR-AUC of the M1 models (python -m src.report --auc; local only, needs data/processed)
+M1_AUC_REPORT_PATH: Path = REPORTS_DIR / "m1_auc.json"
 
 # ---------------------------------------------------------------------------
 # Retraining data (Milestone 2), built by src/prepare_retrain.py from the three M1 splits, which it

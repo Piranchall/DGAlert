@@ -14,19 +14,34 @@ M1 snapshot copy. It holds no timestamps or paths, so rerunning this leaves git 
 
 No training happens here. Needs data/processed/split_report.json (python -m src.prepare_data).
 Run with: python -m src.report
+
+`python -m src.report --auc` instead writes reports/m1_auc.json: ROC-AUC and PR-AUC of the three
+M1 models on test_seen and test_future, and per held-out family. The M1 runs never logged these, and
+the snapshot is read-only, so they are computed from the model files on the processed splits:
+gb from models/production/ (committed, SHA-256 checked), logreg and rf from the M1 files in models/
+(gitignored, on the machine that trained them). Each model is first checked against M1: its
+threshold metrics, recomputed, must equal reports/m1_results.json. This runs locally only (it needs
+data/processed/ and the M1 files), never in CI; m1_results.json and per_family_recall.json are not
+touched.
 """
 
+import argparse
 import json
 import tempfile
 from pathlib import Path
+from typing import Any
 
+import joblib
 import mlflow
+import pandas as pd
 from mlflow.entities import Run
 from mlflow.exceptions import MlflowException
+from sklearn.metrics import f1_score, precision_score, recall_score
 
-from src import config
+from src import config, metrics
 from src.m1_snapshot import prepare_m1_snapshot
 from src.mlflow_store import sqlite_db_path
+from src.model_loader import file_sha256, read_pointer, resolve_model_path
 
 METRICS = [
     "f1_seen",
@@ -212,7 +227,151 @@ def build_production_report(pointer_path: Path, stores: list[tuple[str, str]]) -
     }
 
 
-def main() -> None:
+# ---------------------------------------------------------------------------
+# Threshold-free metrics of the M1 models (--auc)
+# ---------------------------------------------------------------------------
+
+AUC_DIGITS = 4
+# The threshold metrics recomputed to check that a model file is the M1 model.
+CHECKED_METRICS = ["f1_seen", "precision_seen", "recall_seen", "f1_future", "recall_future"]
+
+
+def m1_model_files(m1_results: dict, pointer_path: Path) -> dict[str, Path]:
+    """Where each M1 model is: gb from the production pointer, logreg and rf from M1's model_path.
+
+    The production model must be M1's gb (same version); its SHA-256 is checked against the pointer.
+    """
+    pointer = read_pointer(pointer_path)
+    gb_version = m1_results["models"]["gb"]["params"]["version"]
+    if pointer.get("model_type") != "gb" or pointer.get("version") != gb_version:
+        raise ValueError(
+            f"production is {pointer.get('model_type')} {pointer.get('version')}, not M1's gb "
+            f"{gb_version}: the M1 AUC report needs M1's gb"
+        )
+    gb_path = resolve_model_path(pointer["path"])
+    if file_sha256(gb_path) != pointer["sha256"]:
+        raise ValueError(f"{gb_path} does not match the SHA-256 in {pointer_path}")
+    files = {"gb": gb_path}
+    for model_type in ("logreg", "rf"):
+        path = resolve_model_path(m1_results["models"][model_type]["params"]["model_path"])
+        if not path.is_file():
+            raise FileNotFoundError(
+                f"{path} (M1's {model_type}) is missing: it is gitignored and only exists where M1 "
+                "was trained; python -m src.train --model all retrains it"
+            )
+        files[model_type] = path
+    return {m: files[m] for m in config.MODEL_TYPES}
+
+
+def threshold_metrics(p_seen, p_future, seen: pd.DataFrame, future: pd.DataFrame) -> dict:
+    """The M1 threshold metrics recomputed from P(dga), rounded like m1_results.json."""
+    y_seen = (seen["label"] == "dga").astype(int)
+    y_future = (future["label"] == "dga").astype(int)
+    pred_seen = p_seen >= config.DGA_THRESHOLD
+    pred_future = p_future >= config.DGA_THRESHOLD
+    values = {
+        "f1_seen": f1_score(y_seen, pred_seen),
+        "precision_seen": precision_score(y_seen, pred_seen),
+        "recall_seen": recall_score(y_seen, pred_seen),
+        "f1_future": f1_score(y_future, pred_future),
+        "recall_future": recall_score(y_future, pred_future),
+    }
+    return {k: round(float(v), 4) for k, v in values.items()}
+
+
+def _rounded(values: Any) -> Any:
+    if isinstance(values, dict):
+        return {k: _rounded(v) for k, v in values.items()}
+    if isinstance(values, float):
+        return round(values, AUC_DIGITS)
+    return values
+
+
+def build_auc_report(
+    seen: pd.DataFrame, future: pd.DataFrame, models: dict[str, Any], m1_results: dict
+) -> dict:
+    """ROC-AUC and PR-AUC per model on both test sets and per held-out family.
+
+    models: {model_type: (fitted model, repo-relative file name, sha256)}. Raises if a model's
+    recomputed threshold metrics differ from m1_results.json (then it is not the M1 model).
+    """
+    held_out = sorted(set(future.loc[future["label"] == "dga", "family"]))
+    out = {}
+    for model_type, (model, file_name, sha256) in models.items():
+        p_seen = metrics.dga_probability(model, seen)
+        p_future = metrics.dga_probability(model, future)
+        recomputed = threshold_metrics(p_seen, p_future, seen, future)
+        expected = {m: m1_results["models"][model_type][m] for m in CHECKED_METRICS}
+        if recomputed != expected:
+            raise ValueError(
+                f"{file_name} is not M1's {model_type}: recomputed {recomputed}, M1 {expected}"
+            )
+        out[model_type] = {
+            "file": file_name,
+            "sha256": sha256,
+            "threshold_metrics_match_m1": True,
+            "test_seen": metrics.threshold_free((seen["label"] == "dga").astype(int), p_seen),
+            "test_future": metrics.threshold_free((future["label"] == "dga").astype(int), p_future),
+            "held_out_families": metrics.per_family(future, p_future, held_out),
+        }
+    return _rounded(
+        {
+            "positive_class": "dga",
+            "threshold": config.DGA_THRESHOLD,
+            "metrics": "roc_auc and pr_auc (average precision) from P(dga); recall at threshold",
+            "per_family_rows": "the family's DGA rows against all benign rows of test_future",
+            "rows": {"test_seen": len(seen), "test_future": len(future)},
+            "models": out,
+            "notes": [
+                "Regenerated locally with python -m src.report --auc: it needs data/processed/ and "
+                "the M1 model files, so CI does not rebuild it.",
+                "Each model's threshold metrics were recomputed and equal reports/m1_results.json "
+                "before its AUCs were computed.",
+                "pr_auc_baseline is the family's share of the rows scored (the PR-AUC of a random "
+                "ranking); per-family PR-AUC is not comparable with the overall one.",
+            ],
+        }
+    )
+
+
+def portable(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(config.ROOT_DIR).as_posix()
+    except ValueError:
+        return path.name
+
+
+def write_auc_report(
+    processed_dir: Path = config.PROCESSED_DIR,
+    pointer_path: Path = config.PRODUCTION_MODEL_POINTER,
+    output: Path = config.M1_AUC_REPORT_PATH,
+) -> dict:
+    m1_results = json.loads(config.RESULTS_REPORT_PATH.read_text(encoding="utf-8"))
+    seen = pd.read_parquet(processed_dir / config.TEST_SEEN_PATH.name)
+    future = pd.read_parquet(processed_dir / config.TEST_FUTURE_PATH.name)
+    models = {
+        model_type: (joblib.load(path), portable(path), file_sha256(path))
+        for model_type, path in m1_model_files(m1_results, pointer_path).items()
+    }
+    report = build_auc_report(seen, future, models, m1_results)
+    write_json(output, report)
+    return report
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Rebuild reports/ (see the module docstring).")
+    parser.add_argument(
+        "--auc",
+        action="store_true",
+        help="write reports/m1_auc.json from the M1 model files instead (local only)",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> None:
+    if parse_args(argv).auc:
+        write_auc_report()
+        return
     m1_uri = prepare_m1_snapshot()
     write_reports(tracking_uri=m1_uri)
     stores = [("local", config.mlflow_tracking_uri()), ("m1_snapshot", m1_uri)]

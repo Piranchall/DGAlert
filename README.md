@@ -66,6 +66,12 @@ rejected it.**
 | false-positive rate | 0.1066 | 0.1235 | **fail** (+0.0169; at most +0.005 allowed) |
 | sanity domains | 6/6 | 6/6 | pass |
 
+The run's round report is committed unchanged as
+[`reports/retrain/round_1_rejected.json`](reports/retrain/round_1_rejected.json), with its gate
+report [`round_1_rejected.md`](reports/retrain/round_1_rejected.md). They hold every criterion
+with both models' values, the reasons and the per-family recall. The breakdown below comes from a
+separate analysis, not from these files.
+
 The cause of the extra false positives was measured by also training the same model without the
 matsnu rows:
 

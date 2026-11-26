@@ -60,7 +60,7 @@ Built from the pull requests merged into `main` for the slices in `docs/M2_SLICE
 | S10 Promotion gate | [#41](https://github.com/Piranchall/DGAlert/pull/41) | `feat/promotion-gate` | Muhammad Hussain | Piranchal Mukesh | Piranchal Mukesh | 2026-11-25 | `src/gate.py` with six criteria |
 | S11 Retraining loop | [#42](https://github.com/Piranchall/DGAlert/pull/42) | `feat/retrain-loop` | Muhammad Hussain | Piranchal Mukesh | Piranchal Mukesh | 2026-11-25 | `src/retrain.py`, `retrain.yml`, fixed HGB parameters |
 | S12 Feature-set ablation | [#43](https://github.com/Piranchall/DGAlert/pull/43) | `feat/ablation` | Muhammad Hussain | Piranchal Mukesh | Piranchal Mukesh | 2026-11-25 | `scripts/ablation.py`, `reports/ablation.json` |
-| S13 M2 documentation | this PR | `docs/m2-docs` | Muhammad Hussain | | | | README (Project Focus, changes since the proposal, corrections), `AI_USAGE.md`, this table |
+| S13 M2 documentation | [#44](https://github.com/Piranchall/DGAlert/pull/44) | `docs/m2-docs` | Muhammad Hussain | Piranchal Mukesh | Piranchal Mukesh | 2026-11-25 | README (Project Focus, changes since the proposal, corrections), `AI_USAGE.md`, this table |
 
 PR #36 (`demo/failing-test`, "DEMO: failing test (do not merge)") was opened to show that CI
 blocks a failing test, and closed without merging.
@@ -87,7 +87,7 @@ other member".
   - It requires one approval, dismisses stale approvals on new pushes, requires the `lint`,
     `test` and `build` checks, and blocks force pushes and deletion of `main`.
   - It has no bypass list.
-  - Every PR merged after it was created (#37 to #43) has the other member's approval.
+  - Every PR merged after it was created (#37 to #44) has the other member's approval.
 
 In Milestone 1 no pull request was approved through GitHub's review feature (see the table above
 and [AI_USAGE.md](AI_USAGE.md#our-responsibility)).
@@ -116,5 +116,7 @@ domains are missed was the most useful moment of the milestone.
 ### Milestone 2
 
 #### Muhammad Hussain
+I built the RUNBOOK and the reusable deploy workflow we use for rollbacks, then the frozen evaluation set, the six-criterion promotion gate, the retraining loop and the feature-set ablation. Round 1 taught me the most. Adding matsnu raised its recall from 0.056 to 0.873, but the gate rejected the model because the false-positive rate went from 0.1066 to 0.1235; it had learned that hyphenated dictionary words mean DGA. The proposal’s rule that F1 must improve would have promoted that model, so I now think a gate has to check false positives as well as F1. Before phasing matsnu in again, I’d fix the hyphen features.
 
 #### Piranchal Mukesh
+I built the Milestone 2 baseline: the production model committed with a SHA-256 check, /stats and the API fixes, the Docker image, the three CI jobs that publish it to GHCR, and the Render deployment, which waits until the live /health reports the merged commit. The thing I’ll remember is that production should run the exact image CI tested, and that this has to be checked on every deploy, which is why each one is verified through git_sha. Our process needed the same checking. We thought main was protected when it wasn’t, and two PRs were merged without review before I set up the ruleset.

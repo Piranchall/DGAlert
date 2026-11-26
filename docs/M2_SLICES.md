@@ -4,7 +4,7 @@ Each slice is one GitHub issue, one branch, one pull request, reviewed and merge
 member. In Claude Code, start a fresh session and say: `Do slice S3 from docs/M2_SLICES.md.`
 `CLAUDE.md` holds the workflow every slice follows.
 
-Decisions already taken: Python **3.13** stays (confirmed with the instructor); deployment on
+Decisions already taken: Python **3.13** stays (our decision: the pinned numpy 2.5.4 and shap 0.54.1 need Python >= 3.12); deployment on
 **Render** pulling a prebuilt image from **GHCR**; monitoring endpoint is **`/stats`**.
 
 ## Overview
@@ -305,7 +305,8 @@ D3 undocumented proposal deviations, D4 UMUDGA citation venue, D6 group-of-two n
   - **Project Focus** section: what (KaizenML retraining against drift, with explainability as the
     secondary focus), why it fits, what is built and compared, how it will be demonstrated.
   - Deployment, monitoring and retraining sections (if not already added by S7 and S11).
-  - **Changes since the proposal**: Python 3.13 instead of 3.11 (confirmed with the instructor);
+  - **Changes since the proposal**: Python 3.13 instead of 3.11 (our decision: the pinned numpy 2.5.4 and shap
+    0.54.1 need Python >= 3.12);
     committed sample instead of downloading in `prepare_data`; chrmor dataset not used; SQLite
     MLflow store; `.joblib`; `/stats` instead of `/metrics`; fresh Tranco per retrain dropped; gate
     redesigned, with the evidence.

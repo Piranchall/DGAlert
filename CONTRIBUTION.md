@@ -60,7 +60,7 @@ Built from the pull requests merged into `main` for the slices in `docs/M2_SLICE
 | S10 Promotion gate | [#41](https://github.com/Piranchall/DGAlert/pull/41) | `feat/promotion-gate` | Muhammad Hussain | Piranchal Mukesh | Piranchal Mukesh | 2026-11-25 | `src/gate.py` with six criteria |
 | S11 Retraining loop | [#42](https://github.com/Piranchall/DGAlert/pull/42) | `feat/retrain-loop` | Muhammad Hussain | Piranchal Mukesh | Piranchal Mukesh | 2026-11-25 | `src/retrain.py`, `retrain.yml`, fixed HGB parameters |
 | S12 Feature-set ablation | [#43](https://github.com/Piranchall/DGAlert/pull/43) | `feat/ablation` | Muhammad Hussain | Piranchal Mukesh | Piranchal Mukesh | 2026-11-25 | `scripts/ablation.py`, `reports/ablation.json` |
-| S13 M2 documentation | this PR | `docs/m2-docs` | Muhammad Hussain | | | | README (Project Focus, changes since the proposal, corrections), `AI_USAGE.md`, this table |
+| S13 M2 documentation | [#44](https://github.com/Piranchall/DGAlert/pull/44) | `docs/m2-docs` | Muhammad Hussain | Piranchal Mukesh | Piranchal Mukesh | 2026-11-25 | README (Project Focus, changes since the proposal, corrections), `AI_USAGE.md`, this table |
 
 PR #36 (`demo/failing-test`, "DEMO: failing test (do not merge)") was opened to show that CI
 blocks a failing test, and closed without merging.
@@ -87,7 +87,7 @@ other member".
   - It requires one approval, dismisses stale approvals on new pushes, requires the `lint`,
     `test` and `build` checks, and blocks force pushes and deletion of `main`.
   - It has no bypass list.
-  - Every PR merged after it was created (#37 to #43) has the other member's approval.
+  - Every PR merged after it was created (#37 to #44) has the other member's approval.
 
 In Milestone 1 no pull request was approved through GitHub's review feature (see the table above
 and [AI_USAGE.md](AI_USAGE.md#our-responsibility)).

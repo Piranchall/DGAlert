@@ -16,16 +16,17 @@ Live service: **https://dgalert.onrender.com** (docs at `/docs`).
 1. [Project Focus](#project-focus)
 2. [Architecture](#architecture)
 3. [Quick start](#quick-start)
-4. [Data](#data)
-5. [Results](#results)
-6. [Explainability and the drift story](#explainability-and-the-drift-story)
-7. [API](#api)
-8. [Docker](#docker)
-9. [Deployment](#deployment)
-10. [Limitations](#limitations)
-11. [Changes since the proposal](#changes-since-the-proposal)
-12. [Tests](#tests)
-13. [Citations](#citations)
+4. [Video demo walkthrough](#video-demo-walkthrough)
+5. [Data](#data)
+6. [Results](#results)
+7. [Explainability and the drift story](#explainability-and-the-drift-story)
+8. [API](#api)
+9. [Docker](#docker)
+10. [Deployment](#deployment)
+11. [Limitations](#limitations)
+12. [Changes since the proposal](#changes-since-the-proposal)
+13. [Tests](#tests)
+14. [Citations](#citations)
 
 ## Project Focus
 
@@ -321,6 +322,153 @@ Requirements are split: `requirements-api.txt` holds only what the API needs at 
 mlflow, pytest or ruff; meant for a slim deployment image), and `requirements.txt` includes it
 and adds the training and dev tools, so `pip install -r requirements.txt` still installs
 everything.
+
+## Video demo walkthrough
+
+Every command shown in the Milestone 2 video, in order, run from the clean clone of step 1.
+
+### 1. Clean start
+
+```powershell
+git clone https://github.com/Piranchall/DGAlert.git
+cd DGAlert
+docker build --build-arg GIT_SHA=$(git rev-parse --short HEAD) -t dgalert:local .
+docker run --rm -d -p 8000:8000 --name dgalert dgalert:local
+do { Start-Sleep 2; $s = docker inspect -f '{{.State.Health.Status}}' dgalert; $s } while ($s -eq 'starting')
+Start-Process http://127.0.0.1:8000/docs
+curl.exe http://127.0.0.1:8000/health
+curl.exe -X POST http://127.0.0.1:8000/predict -H "Content-Type: application/json" -d '{\"domain\": \"moiqidfvjjhjmndqp.in\"}'
+```
+
+```bash
+git clone https://github.com/Piranchall/DGAlert.git
+cd DGAlert
+docker build --build-arg GIT_SHA=$(git rev-parse --short HEAD) -t dgalert:local .
+docker run --rm -d -p 8000:8000 --name dgalert dgalert:local
+while s=$(docker inspect -f '{{.State.Health.Status}}' dgalert); echo "$s"; [ "$s" = starting ]; do sleep 2; done
+open http://127.0.0.1:8000/docs      # Linux: xdg-open http://127.0.0.1:8000/docs
+curl http://127.0.0.1:8000/health
+curl -X POST http://127.0.0.1:8000/predict -H "Content-Type: application/json" -d '{"domain": "moiqidfvjjhjmndqp.in"}'
+```
+
+### 2. Docker health
+
+```powershell
+docker ps --filter name=dgalert
+```
+
+```bash
+docker ps --filter name=dgalert
+```
+
+STATUS shows `(healthy)`.
+
+### 3. Monitoring
+
+```powershell
+1..3 | % { curl.exe -s -X POST http://127.0.0.1:8000/predict -H "Content-Type: application/json" -d '{\"domain\": \"moiqidfvjjhjmndqp.in\"}' }
+curl.exe -s -X POST http://127.0.0.1:8000/predict -H "Content-Type: application/json" -d '{\"domain\": \"google.com\"}'
+curl.exe -s http://127.0.0.1:8000/stats
+```
+
+```bash
+for i in 1 2 3; do curl -s -X POST http://127.0.0.1:8000/predict -H "Content-Type: application/json" -d '{"domain": "moiqidfvjjhjmndqp.in"}'; echo; done
+curl -s -X POST http://127.0.0.1:8000/predict -H "Content-Type: application/json" -d '{"domain": "google.com"}'; echo
+curl -s http://127.0.0.1:8000/stats; echo
+```
+
+Read in `/stats` (the counts include step 1's `/predict` call):
+
+- `requests.by_endpoint["POST /predict"]`: `count` 5 and `avg_latency_ms`.
+- `predictions.by_label`: `dga` 4, `benign` 1; `predictions.count` 5.
+- `requests.total` also counts the Docker health checks (see [`GET /stats`](#get-stats)).
+
+### 4. CI
+
+Runs: the repository's **Actions** tab (https://github.com/Piranchall/DGAlert/actions), workflow
+"CI".
+
+The failing-test demo **needs push access to this repository**: anyone else runs it in their own
+fork with Actions enabled. The pull request is a draft, is closed with its branch deleted, and is
+**never merged**.
+
+```powershell
+git switch main; git pull --ff-only
+git switch -c demo/failing-test
+py -3 -c "open('tests/test_demo_failure.py', 'w', newline='\n').write('def test_deliberately_fails() -> None:\n    assert 1 + 1 == 3  # deliberate failure for the CI demo\n')"
+git add tests/test_demo_failure.py
+git commit -m "test: deliberately failing test for the CI demo (do not merge)"
+git push -u origin demo/failing-test
+$pr = gh pr create --draft --base main --title "DEMO: failing test (do not merge)" --body "Shows CI turning red on a failing test. Closed without merging."
+gh pr checks $pr --watch      # lint passes, test fails, build is skipped
+git switch main
+gh pr close $pr --delete-branch --comment "Demo only: closed without merging."
+```
+
+```bash
+git switch main; git pull --ff-only
+git switch -c demo/failing-test
+python3 -c "open('tests/test_demo_failure.py', 'w', newline='\n').write('def test_deliberately_fails() -> None:\n    assert 1 + 1 == 3  # deliberate failure for the CI demo\n')"
+git add tests/test_demo_failure.py
+git commit -m "test: deliberately failing test for the CI demo (do not merge)"
+git push -u origin demo/failing-test
+pr=$(gh pr create --draft --base main --title "DEMO: failing test (do not merge)" --body "Shows CI turning red on a failing test. Closed without merging.")
+gh pr checks "$pr" --watch      # lint passes, test fails, build is skipped
+git switch main
+gh pr close "$pr" --delete-branch --comment "Demo only: closed without merging."
+```
+
+### 5. Deployment
+
+```powershell
+curl.exe https://dgalert.onrender.com/health
+curl.exe -X POST https://dgalert.onrender.com/predict -H "Content-Type: application/json" -d '{\"domain\": \"moiqidfvjjhjmndqp.in\"}'
+curl.exe -X POST https://dgalert.onrender.com/explain -H "Content-Type: application/json" -d '{\"domain\": \"wedding-muscle.com\"}'
+curl.exe https://dgalert.onrender.com/stats
+git rev-parse --short=7 origin/main
+```
+
+```bash
+curl https://dgalert.onrender.com/health
+curl -X POST https://dgalert.onrender.com/predict -H "Content-Type: application/json" -d '{"domain": "moiqidfvjjhjmndqp.in"}'
+curl -X POST https://dgalert.onrender.com/explain -H "Content-Type: application/json" -d '{"domain": "wedding-muscle.com"}'
+curl https://dgalert.onrender.com/stats
+git rev-parse --short=7 origin/main
+```
+
+- **`git_sha` in `/health`** equals the `git rev-parse` output.
+- **Right after a merge** it can be one commit behind `origin/main` for a few minutes, until the
+  deploy job finishes.
+- **The first call** after the service has been idle can take up to about a minute.
+
+### 6. Rollback
+
+See [RUNBOOK.md](RUNBOOK.md): rollback and roll-forward with
+`gh workflow run deploy.yml -f tag=sha-<short sha>`.
+
+### 7. Retraining
+
+- **Gate summary of round 1** (rejected): the summary of run
+  https://github.com/Piranchall/DGAlert/actions/runs/45668715690.
+- **A dry run** (needs write access; `models/production/` is not changed):
+
+```powershell
+gh workflow run retrain.yml -f dry_run=true
+```
+
+```bash
+gh workflow run retrain.yml -f dry_run=true
+```
+
+### 8. Cleanup
+
+```powershell
+docker rm -f dgalert
+```
+
+```bash
+docker rm -f dgalert
+```
 
 ## Data
 
@@ -1231,6 +1379,7 @@ docker run --rm -p 8000:8000 ghcr.io/piranchall/dgalert:main
 | `tests/test_config.py` | paths inside the repo, local MLflow store and its env-var overrides, working folders gitignored, seed, family lists disjoint |
 | `tests/test_features.py` | normalization, second-level label extraction, every feature, dictionary split |
 | `tests/test_prepare_data.py` | validation drops, grouped split with no shared labels, held-out families only in test_future, identical output on a rerun |
+| `tests/test_readme_walkthrough.py` | the "Video demo walkthrough" section: right after Quick start and in Contents, the eight steps in order, a PowerShell and a bash block for every step with commands, clone/build/run and local calls identical to Quick start, live calls identical to Deployment, `127.0.0.1` (no `localhost`) and `curl.exe` only in PowerShell, one container name throughout, the `/stats` counts matching the calls, the CI demo as a closed draft never merged and matching the CI jobs, the RUNBOOK command, the round 1 run and a real `dry_run` input of `retrain.yml` |
 | `tests/test_metrics.py` | ROC-AUC and PR-AUC on hand-computed examples (including perfect, inverted and single-class), one family's DGA rows against all benign rows, the PR-AUC baseline and recall per family; the M1 AUC report: every model, test set and held-out family, rounded and deterministic, a model whose recomputed metrics differ from M1 refused, model files from the pointer and M1's paths (retrained production, tampered gb and missing files refused); the committed `reports/m1_auc.json` agrees with `per_family_recall.json` and `m1_results.json` |
 | `tests/test_gate.py` | ROC-AUC / PR-AUC reported for both models (a hand-computed value) but never a criterion, even at AUC 0; promote; reject on each of the six criteria alone; several failures all listed; inclusive boundaries; earlier-family criterion passes with no earlier families and catches a collapse that seen F1 misses; stored metrics ignored; committed hash used by default; configuration errors raise; deterministic JSON; end to end with two small real models on `data/sample` |
 | `tests/test_prepare_retrain.py` | hash rule and content-hash format, parts cover the inputs, no label shared between any two parts, about 10% / 20% per family, output independent of row order, membership stable when rows or families are added, one label stays on one side, phase-in batches; on the committed sample: M1 split counts unchanged, frozen eval report equal to the committed one, same hash on a second run |

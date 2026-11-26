@@ -1,0 +1,244 @@
+{
+  "round": 1,
+  "new_families": [
+    "matsnu"
+  ],
+  "prior_families": [],
+  "promote": false,
+  "applied": false,
+  "dry_run": false,
+  "champion": {
+    "version": "20261105_062411",
+    "model_type": "gb",
+    "sha256": "140989615550baed7e883885e0bfe3fd3b855b79e11bc70ff2d9f3d9f3a11b47"
+  },
+  "model_type": "hgb",
+  "params": {
+    "learning_rate": 0.1,
+    "max_iter": 200,
+    "max_leaf_nodes": 63,
+    "min_samples_leaf": 20,
+    "early_stopping": false,
+    "random_state": 42
+  },
+  "training_rows": 140657,
+  "train_fit_rows": 138248,
+  "phase_in_rows": 2409,
+  "mlflow_run_id": "781f46c202e54a3d82b90562749c5f45",
+  "mlflow_experiment": "dgalert-m2-kaizen",
+  "decision": {
+    "promote": false,
+    "failed": [
+      "false_positive_rate"
+    ],
+    "reasons": [
+      {
+        "name": "frozen_eval_hash",
+        "passed": true,
+        "champion": null,
+        "challenger": null,
+        "delta": null,
+        "threshold": null,
+        "message": "frozen eval set hash matches reports/eval_frozen.json"
+      },
+      {
+        "name": "new_family_recall",
+        "passed": true,
+        "champion": 0.056027,
+        "challenger": 0.872666,
+        "delta": 0.816638,
+        "threshold": 0.02,
+        "message": "recall on the new families changes by +0.8166 (needs at least +0.02)"
+      },
+      {
+        "name": "seen_f1",
+        "passed": true,
+        "champion": 0.889092,
+        "challenger": 0.885033,
+        "delta": -0.004059,
+        "threshold": 0.01,
+        "message": "F1 on the seen families changes by -0.0041 (may drop by at most 0.01)"
+      },
+      {
+        "name": "false_positive_rate",
+        "passed": false,
+        "champion": 0.106613,
+        "challenger": 0.123485,
+        "delta": 0.016872,
+        "threshold": 0.005,
+        "message": "false-positive rate changes by +0.0169 (may rise by at most 0.005)"
+      },
+      {
+        "name": "prior_family_recall",
+        "passed": true,
+        "champion": null,
+        "challenger": null,
+        "delta": null,
+        "threshold": 0.02,
+        "message": "no families phased in during earlier rounds: passes"
+      },
+      {
+        "name": "sanity_domains",
+        "passed": true,
+        "champion": "6/6",
+        "challenger": "6/6",
+        "delta": null,
+        "threshold": null,
+        "message": "every sanity domain classified correctly"
+      }
+    ],
+    "new_families": [
+      "matsnu"
+    ],
+    "prior_families": [],
+    "eval_frozen": {
+      "sha256": "78f48f6b974375c31874e565a6705d0bf8250061589bdefe57663dae6fab0947",
+      "expected_sha256": "78f48f6b974375c31874e565a6705d0bf8250061589bdefe57663dae6fab0947",
+      "rows": 46800
+    },
+    "thresholds": {
+      "min_new_family_recall_gain": 0.02,
+      "max_seen_f1_drop": 0.01,
+      "max_false_positive_rate_rise": 0.005,
+      "max_prior_family_recall_drop": 0.02
+    },
+    "metrics": {
+      "champion": {
+        "overall": {
+          "precision": 0.920611,
+          "recall": 0.8558,
+          "f1": 0.887023
+        },
+        "seen_f1": 0.889092,
+        "new_family_recall": 0.056027,
+        "prior_family_recall": null,
+        "false_positive_rate": 0.106613,
+        "per_family_recall": {
+          "alureon": 0.977352,
+          "banjori": 1.0,
+          "bedep": 0.99341,
+          "benign": 0.893387,
+          "ccleaner": 0.998302,
+          "chinad": 0.998285,
+          "cryptolocker": 0.99654,
+          "dircrypt": 0.987013,
+          "dyre": 0.644588,
+          "fobber_v1": 1.0,
+          "fobber_v2": 0.983221,
+          "gozi_gpl": 0.730835,
+          "gozi_luther": 0.822526,
+          "gozi_nasa": 0.744337,
+          "gozi_rfc4343": 0.803604,
+          "locky": 0.964228,
+          "matsnu": 0.056027,
+          "murofet_v1": 1.0,
+          "murofet_v2": 0.996581,
+          "murofet_v3": 1.0,
+          "necurs": 0.98087,
+          "nymaim": 0.205255,
+          "padcrypt": 0.998392,
+          "pizd": 0.69313,
+          "proslikefan": 0.876033,
+          "pushdo": 0.912972,
+          "pykspa": 0.901528,
+          "pykspa_noise": 0.870313,
+          "qadars": 1.0,
+          "qakbot": 0.991948,
+          "ramdo": 1.0,
+          "ramnit": 0.983051,
+          "ranbyus_v1": 1.0,
+          "ranbyus_v2": 1.0,
+          "rovnix": 0.96633,
+          "shiotob": 0.72381,
+          "simda": 0.428822,
+          "sisron": 1.0,
+          "suppobox_1": 0.69697,
+          "suppobox_2": 0.222764,
+          "suppobox_3": 0.977742,
+          "tempedreve": 0.911252,
+          "tinba": 0.993151,
+          "vawtrak_v1": 0.916096,
+          "vawtrak_v2": 0.8125,
+          "vawtrak_v3": 0.605442,
+          "zeus-newgoz": 1.0
+        },
+        "sanity": {
+          "google.com": "benign",
+          "wikipedia.org": "benign",
+          "github.com": "benign",
+          "teco.com.tw": "benign",
+          "moiqidfvjjhjmndqp.in": "dga",
+          "qxxsoxcwrcplo.net": "dga"
+        }
+      },
+      "challenger": {
+        "overall": {
+          "precision": 0.911424,
+          "recall": 0.879556,
+          "f1": 0.895207
+        },
+        "seen_f1": 0.885033,
+        "new_family_recall": 0.872666,
+        "prior_family_recall": null,
+        "false_positive_rate": 0.123485,
+        "per_family_recall": {
+          "alureon": 0.973868,
+          "banjori": 0.991974,
+          "bedep": 0.995058,
+          "benign": 0.876515,
+          "ccleaner": 0.991511,
+          "chinad": 0.998285,
+          "cryptolocker": 0.99481,
+          "dircrypt": 0.98539,
+          "dyre": 0.46042,
+          "fobber_v1": 1.0,
+          "fobber_v2": 0.986577,
+          "gozi_gpl": 0.734242,
+          "gozi_luther": 0.822526,
+          "gozi_nasa": 0.7411,
+          "gozi_rfc4343": 0.803604,
+          "locky": 0.962602,
+          "matsnu": 0.872666,
+          "murofet_v1": 0.998384,
+          "murofet_v2": 0.996581,
+          "murofet_v3": 1.0,
+          "necurs": 0.982609,
+          "nymaim": 0.518883,
+          "padcrypt": 0.996785,
+          "pizd": 0.737405,
+          "proslikefan": 0.880992,
+          "pushdo": 0.924466,
+          "pykspa": 0.906621,
+          "pykspa_noise": 0.873437,
+          "qadars": 1.0,
+          "qakbot": 0.991948,
+          "ramdo": 1.0,
+          "ramnit": 0.977966,
+          "ranbyus_v1": 0.995098,
+          "ranbyus_v2": 1.0,
+          "rovnix": 0.96633,
+          "shiotob": 0.695238,
+          "simda": 0.441125,
+          "sisron": 1.0,
+          "suppobox_1": 0.73975,
+          "suppobox_2": 0.245528,
+          "suppobox_3": 0.974563,
+          "tempedreve": 0.919176,
+          "tinba": 0.991438,
+          "vawtrak_v1": 0.910959,
+          "vawtrak_v2": 0.842949,
+          "vawtrak_v3": 0.653061,
+          "zeus-newgoz": 1.0
+        },
+        "sanity": {
+          "google.com": "benign",
+          "wikipedia.org": "benign",
+          "github.com": "benign",
+          "teco.com.tw": "benign",
+          "moiqidfvjjhjmndqp.in": "dga",
+          "qxxsoxcwrcplo.net": "dga"
+        }
+      }
+    }
+  }
+}

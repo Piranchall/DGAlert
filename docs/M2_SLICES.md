@@ -26,6 +26,7 @@ Decisions already taken: Python **3.13** stays (our decision: the pinned numpy 2
 | S12 | Feature-set ablation | `feat/ablation` | Hussain | S2 | Nice to have |
 | S13 | M2 documentation | `docs/m2-docs` | Hussain (both write their own reflections) | all | M2 required |
 | S14 | Threshold-free metrics (ROC-AUC, PR-AUC) | `feat/roc-auc` | Piranchal | S2, S10, S11 | M1 review feedback |
+| S15 | Video demo walkthrough | `docs/demo-walkthrough` | Hussain | S13, S14 | M2 video |
 
 **Cut line if behind on Friday:** S12 moves to the final phase, and S11 ships as a dry run (gate
 decision and report, no automatic PR). The course allows the focus area to be "in progress" at M2.
@@ -348,6 +349,27 @@ unseen data."
 **Acceptance**
 - Deterministic `reports/m1_auc.json`; each model verified against M1 before its AUCs are written;
   gate decisions unchanged (still six criteria).
+
+## S15: Video demo walkthrough
+
+Added after S14, so anyone can repeat every command shown in the Milestone 2 video.
+
+**Do**
+- README: a "Video demo walkthrough" section right after Quick start, in Contents. Short step
+  headings and commands, no narration, every step in PowerShell (`curl.exe`, Windows quoting) and
+  bash. Commands that already exist in Quick start or Deployment are the same text.
+- Steps: clean start with a wait-until-healthy loop, `/docs`, `/health`, `/predict`; `docker ps`
+  showing `(healthy)`; monitoring (three dga and one benign `/predict`, then `/stats` and the fields
+  to read); CI (the Actions tab, then the failing-test demo: a draft PR closed with its branch
+  deleted, never merged; needs push access, so others use their own fork with Actions enabled);
+  deployment (the live calls, `git_sha` against `git rev-parse --short=7 origin/main`); rollback
+  (link to `RUNBOOK.md`); retraining (run 45668715690's gate summary, a dry run); cleanup.
+- A test that keeps the section in step with Quick start, Deployment, `RUNBOOK.md` and the
+  workflows.
+
+**Acceptance**
+- Every local command run as written in PowerShell and bash; the live service called read-only.
+  The CI demo and the workflows are run on camera, not by Claude Code.
 
 ---
 

@@ -116,7 +116,7 @@ domains are missed was the most useful moment of the milestone.
 ### Milestone 2
 
 #### Muhammad Hussain
-
+I built the RUNBOOK and the reusable deploy workflow we use for rollbacks, then the frozen evaluation set, the six-criterion promotion gate, the retraining loop and the feature-set ablation. Round 1 taught me the most. Adding matsnu raised its recall from 0.056 to 0.873, but the gate rejected the model because the false-positive rate went from 0.1066 to 0.1235; it had learned that hyphenated dictionary words mean DGA. The proposal’s rule that F1 must improve would have promoted that model, so I now think a gate has to check false positives as well as F1. Before phasing matsnu in again, I’d fix the hyphen features.
 
 #### Piranchal Mukesh
 I built the Milestone 2 baseline: the production model committed with a SHA-256 check, /stats and the API fixes, the Docker image, the three CI jobs that publish it to GHCR, and the Render deployment, which waits until the live /health reports the merged commit. The thing I’ll remember is that production should run the exact image CI tested, and that this has to be checked on every deploy, which is why each one is verified through git_sha. Our process needed the same checking. We thought main was protected when it wasn’t, and two PRs were merged without review before I set up the ruleset.

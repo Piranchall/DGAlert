@@ -27,6 +27,7 @@ Decisions already taken: Python **3.13** stays (our decision: the pinned numpy 2
 | S13 | M2 documentation | `docs/m2-docs` | Hussain (both write their own reflections) | all | M2 required |
 | S14 | Threshold-free metrics (ROC-AUC, PR-AUC) | `feat/roc-auc` | Piranchal | S2, S10, S11 | M1 review feedback |
 | S15 | Video demo walkthrough | `docs/demo-walkthrough` | Hussain | S13, S14 | M2 video |
+| S16 | Concise README | `docs/readme-concise` | Piranchal | S15 | Readability |
 
 **Cut line if behind on Friday:** S12 moves to the final phase, and S11 ships as a dry run (gate
 decision and report, no automatic PR). The course allows the focus area to be "in progress" at M2.
@@ -370,6 +371,23 @@ Added after S14, so anyone can repeat every command shown in the Milestone 2 vid
 **Acceptance**
 - Every local command run as written in PowerShell and bash; the live service called read-only.
   The CI demo and the workflows are run on camera, not by Claude Code.
+
+## S16: Concise README
+
+Added after S15: the README had grown to about 12,000 words.
+
+**Do**
+- Remove "Changes since the proposal" and "From source (Python)" (with its MLflow-stores and
+  production-model subsections).
+- Merge Quick start and the video walkthrough into one Quick start of eight steps; the Deployment
+  section links to its step 5 instead of repeating the live calls.
+- Shorten the prose of every section to about 6,000 words in total, keeping every command, number
+  and table.
+- Update the README test to the merged structure.
+
+**Acceptance**
+- No figure lost (checked by comparing the numbers in the old and new README); all internal links
+  resolve; the tests pass.
 
 ---
 

@@ -1,7 +1,7 @@
-"""The README's "Video demo walkthrough" stays in step with the rest of the README and the repo.
+"""The README's Quick start (the Milestone 2 video walkthrough) stays consistent and complete.
 
-Commands that also appear in Quick start and Deployment must be the same text, every step with
-commands gives them for PowerShell and bash, and the links and workflow inputs it names exist.
+Every step with commands gives them for PowerShell and bash, the two shells run the same calls,
+commands are not repeated elsewhere in the README, and the links and workflow inputs it names exist.
 """
 
 import re
@@ -12,7 +12,8 @@ import yaml
 from src import config
 
 README = (config.ROOT_DIR / "README.md").read_text(encoding="utf-8")
-SECTION_TITLE = "Video demo walkthrough"
+SECTION_TITLE = "Quick start"
+LIVE_URL = "https://dgalert.onrender.com"
 STEPS = [
     "1. Clean start",
     "2. Docker health",
@@ -50,22 +51,24 @@ def lines(text: str, language: str | None = None) -> list[str]:
 
 
 WALKTHROUGH = section(SECTION_TITLE)
-QUICK_START = section("Quick start")
-DEPLOYMENT = section("Deployment")
 
 
 def step(name: str) -> str:
-    """One step, searched inside the walkthrough only (the last step ends with the section)."""
+    """One step, searched inside the Quick start only (the last step ends with the section)."""
     return section(name, "###", WALKTHROUGH)
 
 
-def test_section_comes_right_after_quick_start_and_is_in_contents() -> None:
+def as_bash(powershell_line: str) -> str:
+    """The bash form of a PowerShell curl line: curl.exe -> curl, \\" -> "."""
+    return powershell_line.replace("curl.exe", "curl").replace('\\"', '"')
+
+
+def test_quick_start_is_in_contents_and_the_old_sections_are_gone() -> None:
+    assert "3. [Quick start](#quick-start)" in section("Contents")
     top_level = re.findall(r"^## (.+?)\s*$", README, re.M)
-    assert top_level[top_level.index("Quick start") + 1] == SECTION_TITLE
-    contents = section("Contents")
-    assert "[Quick start](#quick-start)\n4. [Video demo walkthrough](#video-demo-walkthrough)" in (
-        contents
-    )
+    assert top_level.index("Quick start") == top_level.index("Architecture") + 1
+    for removed in ("Video demo walkthrough", "Changes since the proposal", "From source (Python)"):
+        assert not re.search(rf"^#+ {re.escape(removed)}\s*$", README, re.M), removed
 
 
 def test_steps_are_in_the_video_order() -> None:
@@ -79,27 +82,26 @@ def test_every_step_has_a_powershell_and_a_bash_block(name: str) -> None:
     assert len(blocks(text, "bash")) == 1, name
 
 
-def test_clean_start_reuses_the_quick_start_commands() -> None:
-    quick = set(lines(QUICK_START))
-    reused = [
-        line
-        for line in lines(step("1. Clean start"))
-        if line.startswith(("git clone", "cd ", "docker build", "docker run", "curl"))
+@pytest.mark.parametrize("name", ["1. Clean start", "5. Deployment"])
+def test_both_shells_make_the_same_calls(name: str) -> None:
+    text = step(name)
+    powershell = [as_bash(c) for c in lines(text, "powershell") if c.startswith("curl.exe")]
+    bash = [c for c in lines(text, "bash") if c.startswith("curl")]
+    assert powershell == bash
+    shared = ("git clone", "cd ", "docker build", "docker run", "git rev-parse")
+    assert [c for c in lines(text, "powershell") if c.startswith(shared)] == [
+        c for c in lines(text, "bash") if c.startswith(shared)
     ]
-    # clone, cd, build, run and the two local calls, once per shell
-    assert len(reused) == 12
-    for line in reused:
-        assert line in quick, f"not the same as in Quick start: {line}"
 
 
-def test_deployment_step_reuses_the_deployment_section_calls() -> None:
-    deployment = set(lines(DEPLOYMENT))
-    live = [line for line in lines(step("5. Deployment")) if "onrender.com" in line]
-    assert len(live) == 8  # health, predict, explain, stats, in each shell
-    for line in live:
-        assert line in deployment, f"not the same as in Deployment: {line}"
-    for language in ("powershell", "bash"):
-        assert "git rev-parse --short=7 origin/main" in lines(step("5. Deployment"), language)
+def test_commands_are_not_repeated_outside_the_quick_start() -> None:
+    rest = README.replace(WALKTHROUGH, "")
+    for endpoint in ("/health", "/predict", "/explain", "/stats"):
+        assert f"{LIVE_URL}{endpoint}" in WALKTHROUGH
+        assert f"curl.exe {LIVE_URL}{endpoint}" not in rest
+        assert f"curl {LIVE_URL}{endpoint}" not in rest
+    assert "docker run --rm -d -p 8000:8000" not in rest
+    assert "[Quick start, step 5](#5-deployment)" in section("Deployment")
 
 
 def test_local_calls_use_127_0_0_1_and_powershell_uses_curl_exe() -> None:
@@ -110,11 +112,11 @@ def test_local_calls_use_127_0_0_1_and_powershell_uses_curl_exe() -> None:
         assert "curl.exe" not in line, line
 
 
-def test_container_name_and_image_match_the_docker_run_line() -> None:
-    run = next(line for line in lines(QUICK_START) if line.startswith("docker run"))
+def test_one_container_name_throughout() -> None:
+    run = next(line for line in lines(WALKTHROUGH) if line.startswith("docker run"))
     name = re.search(r"--name (\S+)", run).group(1)
     for line in lines(WALKTHROUGH):
-        if line.startswith(("docker inspect", "docker ps", "docker rm")) or "inspect -f" in line:
+        if line.startswith(("docker ps", "docker rm")) or "docker inspect" in line:
             assert re.search(rf"\b{name}\b", line), line
 
 
@@ -135,7 +137,7 @@ def test_monitoring_counts_match_the_calls() -> None:
 def test_ci_demo_is_a_closed_draft_and_needs_push_access() -> None:
     text = step("4. CI")
     assert "needs push access" in text
-    assert "own\nfork with Actions enabled" in text or "own fork with Actions enabled" in text
+    assert re.search(r"own\s+fork with Actions enabled", text)
     assert "**never merged**" in text
     powershell, bash = lines(text, "powershell"), lines(text, "bash")
     for commands in (powershell, bash):

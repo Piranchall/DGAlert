@@ -14,6 +14,10 @@ src.config, boundaries inclusive):
    would otherwise go unnoticed;
 6. sanity_domains: the challenger classifies every config.SANITY_DOMAINS entry correctly.
 
+ROC-AUC and PR-AUC (src.metrics) are reported for both models, overall and for the new and the
+earlier families against all benign rows, but they are not criteria: they show whether a model
+ranks a family correctly independently of the threshold.
+
 All criteria are always evaluated, so a rejection lists every reason. Retraining (S11) promotes
 through decide(); src.train.promote_if_better stays for reproducing Milestone 1.
 """
@@ -27,6 +31,7 @@ from sklearn.metrics import f1_score, precision_score, recall_score
 
 from src import config
 from src.features import FEATURE_NAMES, extract_features
+from src.metrics import against_benign, dga_probability, threshold_free
 from src.prepare_retrain import content_hash
 from src.train import predict
 
@@ -64,6 +69,7 @@ def score(
     new = is_dga & eval_frozen["family"].isin(new_families)
     prior = is_dga & eval_frozen["family"].isin(prior_families)
     correct = (pred == y).groupby(eval_frozen["family"]).mean().sort_index()
+    p = dga_probability(model, eval_frozen)
     return {
         "overall": {
             "precision": float(precision_score(y, pred, zero_division=0)),
@@ -76,7 +82,19 @@ def score(
         "false_positive_rate": _share(pred[~is_dga] == 1),
         "per_family_recall": {family: float(r) for family, r in correct.items()},
         "sanity": sanity_labels(model),
+        # Reported only, never a criterion.
+        "threshold_free": {
+            "overall": threshold_free(y, p),
+            "new_families": _auc_only(against_benign(eval_frozen, p, new_families)),
+            "prior_families": _auc_only(against_benign(eval_frozen, p, prior_families))
+            if prior.any()
+            else None,
+        },
     }
+
+
+def _auc_only(scores: dict[str, Any]) -> dict[str, float | None]:
+    return {"roc_auc": scores["roc_auc"], "pr_auc": scores["pr_auc"]}
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +262,10 @@ def _rounded_scores(scores: dict[str, Any]) -> dict[str, Any]:
         "false_positive_rate": _round(scores["false_positive_rate"]),
         "per_family_recall": {k: _round(v) for k, v in scores["per_family_recall"].items()},
         "sanity": scores["sanity"],
+        "threshold_free": {
+            part: None if values is None else {k: _round(v) for k, v in values.items()}
+            for part, values in scores["threshold_free"].items()
+        },
     }
 
 

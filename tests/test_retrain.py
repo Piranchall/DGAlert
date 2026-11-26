@@ -365,3 +365,32 @@ def test_summary_markdown_lists_every_criterion(
     for reason in report["decision"]["reasons"]:
         assert f"| {reason['name']} |" in summary
     assert "| matsnu |" in summary
+    # threshold-free metrics: reported in a separate table, never as a criterion row
+    assert "Threshold-free metrics (reported, not gated):" in summary
+    assert "| new families vs benign |" in summary
+    assert "earlier families vs benign" not in summary  # round 1 has none
+
+
+def test_threshold_free_metrics_are_logged_to_mlflow_but_old_decisions_still_render() -> None:
+    scores = {
+        "seen_f1": 0.9,
+        "new_family_recall": 0.5,
+        "prior_family_recall": None,
+        "false_positive_rate": 0.1,
+        "overall": {"f1": 0.9},
+        "per_family_recall": {"matsnu": 0.5},
+        "threshold_free": {
+            "overall": {"roc_auc": 0.95, "pr_auc": 0.96},
+            "new_families": {"roc_auc": 0.7, "pr_auc": 0.2},
+            "prior_families": None,
+        },
+    }
+    decision = {"promote": False, "metrics": {"champion": scores, "challenger": scores}}
+    metrics = retrain.flat_metrics(decision)
+    assert metrics["challenger_new_families_roc_auc"] == 0.7
+    assert metrics["champion_overall_pr_auc"] == 0.96
+    assert not any("prior_families" in k for k in metrics)
+
+    # a decision written before S14 (no threshold_free) gives no table instead of failing
+    old = {k: v for k, v in scores.items() if k != "threshold_free"}
+    assert retrain.threshold_free_lines({"metrics": {"champion": old, "challenger": old}}) == []

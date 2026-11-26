@@ -15,6 +15,7 @@ import pytest
 from sklearn.ensemble import GradientBoostingClassifier
 
 from src import config
+from src import gate as gate_module
 from src.features import FEATURE_NAMES, extract_features
 from src.gate import committed_sha256, decide, write_decision
 from src.prepare_retrain import content_hash
@@ -122,6 +123,37 @@ def test_promotes_a_better_challenger() -> None:
     assert [r["name"] for r in decision["reasons"]] == CRITERIA
     new = reason(decision, "new_family_recall")
     assert (new["champion"], new["challenger"], new["delta"]) == (0.1, 0.5, 0.4)
+
+
+def test_threshold_free_metrics_are_reported_but_not_criteria() -> None:
+    decision = run(model(new_tp=50))
+    assert [r["name"] for r in decision["reasons"]] == CRITERIA  # still exactly six
+    champion = decision["metrics"]["champion"]["threshold_free"]
+    # Scores are 0 or 1. matsnu vs benign: 10/100 flagged against 10/200 benign flagged, so
+    # P(pos > neg) = 0.1 * 0.95 = 0.095, ties 0.1 * 0.05 + 0.9 * 0.95 = 0.86, AUC 0.095 + 0.43.
+    assert champion["new_families"]["roc_auc"] == 0.525
+    assert set(champion) == {"overall", "new_families", "prior_families"}
+    assert set(champion["prior_families"]) == {"roc_auc", "pr_auc"}
+    challenger = decision["metrics"]["challenger"]["threshold_free"]
+    assert challenger["new_families"]["roc_auc"] > champion["new_families"]["roc_auc"]
+
+
+def test_threshold_free_has_no_earlier_families_entry_in_round_one() -> None:
+    decision = run(model(new_tp=50), prior=[])
+    assert decision["metrics"]["champion"]["threshold_free"]["prior_families"] is None
+
+
+def test_threshold_free_metrics_cannot_reject(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Even an AUC of 0 for every model and every row group leaves the decision to the six criteria.
+    worst = {"roc_auc": 0.0, "pr_auc": 0.0}
+    monkeypatch.setattr(gate_module, "threshold_free", lambda y, p: dict(worst))
+    monkeypatch.setattr(
+        gate_module, "against_benign", lambda df, p, f: {**worst, "positives": 1, "benign": 1}
+    )
+    decision = run(model(new_tp=50))
+    assert decision["promote"] is True
+    assert decision["failed"] == []
+    assert decision["metrics"]["challenger"]["threshold_free"]["overall"] == worst
 
 
 @pytest.mark.parametrize(

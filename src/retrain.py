@@ -105,7 +105,44 @@ def flat_metrics(decision: dict) -> dict[str, float]:
                 metrics[f"{side}_{name}"] = scores[name]
         for name, value in scores["overall"].items():
             metrics[f"{side}_overall_{name}"] = value
+        for part, values in scores.get("threshold_free", {}).items():
+            for name, value in (values or {}).items():
+                if value is not None:
+                    metrics[f"{side}_{part}_{name}"] = value
     return metrics
+
+
+THRESHOLD_FREE_ROWS = [
+    ("overall", "all frozen rows"),
+    ("new_families", "new families vs benign"),
+    ("prior_families", "earlier families vs benign"),
+]
+
+
+def threshold_free_lines(decision: dict) -> list[str]:
+    """The gate report's ROC-AUC / PR-AUC table (reported, not gated); empty for old decisions."""
+    champion = decision["metrics"]["champion"].get("threshold_free")
+    challenger = decision["metrics"]["challenger"].get("threshold_free")
+    if not champion or not challenger:
+        return []
+    lines = [
+        "",
+        "Threshold-free metrics (reported, not gated):",
+        "",
+        "| Rows | Champion ROC-AUC | Challenger ROC-AUC | Champion PR-AUC | Challenger PR-AUC |",
+        "|---|---|---|---|---|",
+    ]
+    for part, label in THRESHOLD_FREE_ROWS:
+        if champion.get(part) is None or challenger.get(part) is None:
+            continue
+        c, h = champion[part], challenger[part]
+        if None in (*c.values(), *h.values()):
+            continue
+        lines.append(
+            f"| {label} | {c['roc_auc']:.4f} | {h['roc_auc']:.4f} | "
+            f"{c['pr_auc']:.4f} | {h['pr_auc']:.4f} |"
+        )
+    return lines
 
 
 def summary_markdown(report: dict) -> str:
@@ -145,6 +182,7 @@ def summary_markdown(report: dict) -> str:
     challenger = decision["metrics"]["challenger"]["per_family_recall"]
     lines += ["", "| Phased-in family | Champion recall | Challenger recall |", "|---|---|---|"]
     lines += [f"| {f} | {champion[f]:.4f} | {challenger[f]:.4f} |" for f in families]
+    lines += threshold_free_lines(decision)
     if report.get("applied"):
         lines += [
             "",
